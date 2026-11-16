@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🗺️ Herramienta RTM: Asignación Espacial y Corrección de Clientes")
-st.markdown("Cruza automáticamente la ubicación de tus clientes con los polígonos de distribución (GeoJSON) y gestiona correcciones.")
+st.markdown("Cruza automáticamente la ubicación de tus clientes con los polígonos de distribución (GeoJSON) y gestiona correcciones con mapa interactivo sincronizado.")
 
 @st.cache_data
 def load_data():
@@ -46,7 +46,7 @@ modo = st.sidebar.radio("Selecciona una opción:", ["Consulta y Asignación Auto
 if modo == "Consulta y Asignación Automática":
     st.subheader("🔍 Búsqueda por ID de Cliente y Asignación de Distribuidor")
     
-    # Selector basado en IdCliente (convertido a string para evitar problemas de tipos)
+    # Selector basado en IdCliente
     cliente_opciones = df_clientes['IdCliente'].astype(str).unique()
     cliente_seleccionado = st.selectbox("Seleccione o busque el ID de Cliente:", cliente_opciones)
     
@@ -63,8 +63,8 @@ if modo == "Consulta y Asignación Automática":
         lat_actual = float(str(cliente_data.get('Latitud', 0)).replace(',', '.'))
         lon_actual = float(str(cliente_data.get('Longitud', 0)).replace(',', '.'))
         
-        st.write(f"**Latitud:** {lat_actual}")
-        st.write(f"**Longitud:** {lon_actual}")
+        st.write(f"**Latitud original:** {lat_actual}")
+        st.write(f"**Longitud original:** {lon_actual}")
         
         # Motor Point-in-Polygon
         punto = Point(lon_actual, lat_actual)
@@ -104,49 +104,91 @@ if modo == "Consulta y Asignación Automática":
         st_folium(m, width=700, height=450)
 
 elif modo == "Editor de Coordenadas y Bitácora":
-    st.subheader("📝 Corrección de Georreferenciación por ID de Cliente")
-    st.markdown("Modifica las coordenadas de un cliente buscándolo por su ID y registra el cambio.")
+    st.subheader("📝 Corrección Interactiva de Georreferenciación por ID")
+    st.markdown("Busca al cliente por su ID, ajusta su ubicación escribiendo los valores o haciendo clic en el mapa.")
     
     cliente_opciones = df_clientes['IdCliente'].astype(str).unique()
     cliente_sel = st.selectbox("Seleccione el ID de Cliente a corregir:", cliente_opciones, key="edit_client")
     
     row_data = df_clientes[df_clientes['IdCliente'].astype(str) == str(cliente_sel)].iloc[0]
     
-    st.info(f"**Cliente seleccionado:** {row_data.get('Razon_Social', 'N/A')} | **Dirección:** {row_data.get('Direccion', 'N/A')}")
-    
+    # Inicializar estado de sesión para edición si cambia de cliente
+    if 'current_client' not in st.session_state or st.session_state.current_client != cliente_sel:
+        st.session_state.current_client = cliente_sel
+        st.session_state.edit_lat = float(str(row_data.get('Latitud', 0)).replace(',', '.'))
+        st.session_state.edit_lon = float(str(row_data.get('Longitud', 0)).replace(',', '.'))
+
     orig_lat = float(str(row_data.get('Latitud', 0)).replace(',', '.'))
     orig_lon = float(str(row_data.get('Longitud', 0)).replace(',', '.'))
     
-    with st.form("form_correccion"):
-        c1, c2 = st.columns(2)
-        with c1:
-            nueva_lat = st.number_input("Nueva Latitud", value=orig_lat, format="%.6f")
-        with c2:
-            nueva_lon = st.number_input("Nueva Longitud", value=orig_lon, format="%.6f")
+    st.info(f"**Cliente:** {row_data.get('Razon_Social', 'N/A')} | **Dirección:** {row_data.get('Direccion', 'N/A')}")
+    
+    col_form, col_map = st.columns([1, 1.5])
+    
+    with col_form:
+        with st.form("form_correccion"):
+            st.markdown("#### Coordenadas Editables")
+            # Campos numéricos sincronizados con el estado
+            nueva_lat = st.number_input("Latitud", value=float(st.session_state.edit_lat), format="%.6f", key="input_lat")
+            nueva_lon = st.number_input("Longitud", value=float(st.session_state.edit_lon), format="%.6f", key="input_lon")
             
-        usuario = st.text_input("Usuario responsable:", "Operador_Logistico")
+            usuario = st.text_input("Usuario responsable:", "Operador_Logistico")
+            
+            submitted = st.form_submit_button("Guardar Corrección")
+            
+            if submitted:
+                st.session_state.edit_lat = nueva_lat
+                st.session_state.edit_lon = nueva_lon
+                
+                nuevo_registro = {
+                    "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Cliente_ID": cliente_sel,
+                    "Razon_Social": row_data.get('Razon_Social'),
+                    "Lat_Original": orig_lat,
+                    "Lon_Original": orig_lon,
+                    "Lat_Corregida": nueva_lat,
+                    "Lon_Corregida": nueva_lon,
+                    "Usuario": usuario
+                }
+                
+                if 'correcciones' not in st.session_state:
+                    st.session_state['correcciones'] = []
+                st.session_state['correcciones'].append(nuevo_registro)
+                
+                st.success(f"¡Corrección guardada para el ID {cliente_sel}!")
+
+    with col_map:
+        st.markdown("#### Mapa Interactivo (Haz clic para mover el pin)")
         
-        submitted = st.form_submit_button("Guardar Corrección")
+        # Crear mapa centrado en las coordenadas actuales de edición
+        m_edit = folium.Map(location=[st.session_state.edit_lat, st.session_state.edit_lon], zoom_start=15)
         
-        if submitted:
-            nuevo_registro = {
-                "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Cliente_ID": cliente_sel,
-                "Razon_Social": row_data.get('Razon_Social'),
-                "Lat_Original": orig_lat,
-                "Lon_Original": orig_lon,
-                "Lat_Corregida": nueva_lat,
-                "Lon_Corregida": nueva_lon,
-                "Usuario": usuario
-            }
+        folium.GeoJson(
+            geojson_data,
+            name="Zonas RTM",
+            style_function=lambda x: {'fillColor': '#3388ff', 'color': '#3388ff', 'weight': 2, 'fillOpacity': 0.2}
+        ).add_to(m_edit)
+        
+        folium.Marker(
+            [st.session_state.edit_lat, st.session_state.edit_lon],
+            popup=f"ID: {cliente_sel} (Modificable)",
+            icon=folium.Icon(color="green", icon="map-marker")
+        ).add_to(m_edit)
+        
+        map_data = st_folium(m_edit, width=500, height=400, key=f"map_{cliente_sel}")
+        
+        # Capturar clic en el mapa para actualizar coordenadas automáticamente
+        if map_data and map_data.get("last_clicked"):
+            clicked_lat = map_data["last_clicked"]["lat"]
+            clicked_lon = map_data["last_clicked"]["lng"]
             
-            if 'correcciones' not in st.session_state:
-                st.session_state['correcciones'] = []
-            st.session_state['correcciones'].append(nuevo_registro)
-            
-            st.success(f"¡Corrección registrada exitosamente para el ID {cliente_sel}!")
+            if clicked_lat != st.session_state.edit_lat or clicked_lon != st.session_state.edit_lon:
+                st.session_state.edit_lat = clicked_lat
+                st.session_state.edit_lon = clicked_lon
+                st.rerun()
 
     if 'correcciones' in st.session_state and len(st.session_state['correcciones']) > 0:
+        st.markdown("---")
         st.markdown("### Historial de Correcciones en la Sesión Actual")
         df_corr = pd.DataFrame(st.session_state['correcciones'])
         st.dataframe(df_corr)
