@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🗺️ Herramienta RTM: Asignación Espacial y Corrección de Clientes")
-st.markdown("Consulta y edición geoespacial sincronizada en tiempo real sin rebotes.")
+st.markdown("Consulta y edición geoespacial sincronizada en tiempo real (anti-rebote activado).")
 
 @st.cache_data
 def load_data():
@@ -63,8 +63,8 @@ if modo == "Consulta y Asignación Rápida":
         if id_buscado and id_buscado != "":
             res = df_clientes[df_clientes['IdCliente'] == str(id_buscado).strip()]
             if not res.empty:
-                st.session_state.cons_lat = float(str(res.iloc[0].get('Latitud', -16.528041)).replace(',', '.'))
-                st.session_state.cons_lon = float(str(res.iloc[0].get('Longitud', -68.104807)).replace(',', '.'))
+                st.session_state.cons_lat = round(float(str(res.iloc[0].get('Latitud', -16.528041)).replace(',', '.')), 6)
+                st.session_state.cons_lon = round(float(str(res.iloc[0].get('Longitud', -68.104807)).replace(',', '.')), 6)
             else:
                 st.session_state.cons_lat = -16.528041
                 st.session_state.cons_lon = -68.104807
@@ -76,8 +76,6 @@ if modo == "Consulta y Asignación Rápida":
         st.session_state.cons_lat = -16.528041
     if 'cons_lon' not in st.session_state:
         st.session_state.cons_lon = -68.104807
-    if 'cons_last_clicked' not in st.session_state:
-        st.session_state.cons_last_clicked = None
 
     cliente_encontrado = None
     razon_social_txt = "N/A"
@@ -105,9 +103,9 @@ if modo == "Consulta y Asignación Rápida":
         lat_actual = st.number_input("Latitud", value=float(st.session_state.cons_lat), format="%.6f", key="input_cons_lat")
         lon_actual = st.number_input("Longitud", value=float(st.session_state.cons_lon), format="%.6f", key="input_cons_lon")
         
-        if lat_actual != st.session_state.cons_lat or lon_actual != st.session_state.cons_lon:
-            st.session_state.cons_lat = lat_actual
-            st.session_state.cons_lon = lon_actual
+        if round(lat_actual, 6) != round(st.session_state.cons_lat, 6) or round(lon_actual, 6) != round(st.session_state.cons_lon, 6):
+            st.session_state.cons_lat = round(lat_actual, 6)
+            st.session_state.cons_lon = round(lon_actual, 6)
 
         # --- MOTOR POINT-IN-POLYGON ---
         punto = Point(st.session_state.cons_lon, st.session_state.cons_lat)
@@ -149,16 +147,16 @@ if modo == "Consulta y Asignación Rápida":
             icon=folium.Icon(color="red", icon="user")
         ).add_to(m)
         
-        map_cons_data = st_folium(m, width=700, height=450, key="map_cons_key")
+        map_cons_data = st_folium(m, width=700, height=450, key="map_cons_static_key")
         
-        # Control antirrebote para clics en el mapa
+        # Control antirrebote con redondeo a 6 decimales
         if map_cons_data and map_cons_data.get("last_clicked"):
             click = map_cons_data["last_clicked"]
-            click_coords = (click["lat"], click["lng"])
-            if click_coords != st.session_state.cons_last_clicked:
-                st.session_state.cons_last_clicked = click_coords
-                st.session_state.cons_lat = click["lat"]
-                st.session_state.cons_lon = click["lng"]
+            click_lat = round(click["lat"], 6)
+            click_lon = round(click["lng"], 6)
+            if click_lat != round(st.session_state.cons_lat, 6) or click_lon != round(st.session_state.cons_lon, 6):
+                st.session_state.cons_lat = click_lat
+                st.session_state.cons_lon = click_lon
                 st.rerun()
 
 # ==========================================
@@ -182,8 +180,8 @@ elif modo == "Editor y Creación de Clientes":
                 row_data = res_edit.iloc[0]
                 
         if row_data is not None:
-            default_lat = float(str(row_data.get('Latitud', -16.528041)).replace(',', '.'))
-            default_lon = float(str(row_data.get('Longitud', -68.104807)).replace(',', '.'))
+            default_lat = round(float(str(row_data.get('Latitud', -16.528041)).replace(',', '.')), 6)
+            default_lon = round(float(str(row_data.get('Longitud', -68.104807)).replace(',', '.')), 6)
             razon_social_val = row_data.get('Razon_Social', 'N/A')
             direccion_val = row_data.get('Direccion', 'N/A')
         else:
@@ -209,14 +207,11 @@ elif modo == "Editor y Creación de Clientes":
             st.session_state.prev_edit_target = id_objetivo
             st.session_state.edit_lat = default_lat
             st.session_state.edit_lon = default_lon
-            st.session_state.edit_last_clicked = None
 
         if 'edit_lat' not in st.session_state:
             st.session_state.edit_lat = default_lat
         if 'edit_lon' not in st.session_state:
             st.session_state.edit_lon = default_lon
-        if 'edit_last_clicked' not in st.session_state:
-            st.session_state.edit_last_clicked = None
 
         st.info(f"**Operando sobre ID:** {id_objetivo} | **Cliente:** {razon_social_val or 'Nuevo'}")
 
@@ -238,16 +233,16 @@ elif modo == "Editor y Creación de Clientes":
                 icon=folium.Icon(color="green", icon="map-marker")
             ).add_to(m_edit)
             
-            map_edit_data = st_folium(m_edit, width=500, height=400, key="map_edit_key")
+            map_edit_data = st_folium(m_edit, width=500, height=400, key="map_edit_static_key")
             
-            # Control antirrebote para clics en el mapa del editor
+            # Control antirrebote con redondeo a 6 decimales para clics en el mapa
             if map_edit_data and map_edit_data.get("last_clicked"):
                 click = map_edit_data["last_clicked"]
-                click_coords = (click["lat"], click["lng"])
-                if click_coords != st.session_state.edit_last_clicked:
-                    st.session_state.edit_last_clicked = click_coords
-                    st.session_state.edit_lat = click["lat"]
-                    st.session_state.edit_lon = click["lng"]
+                click_lat = round(click["lat"], 6)
+                click_lon = round(click["lng"], 6)
+                if click_lat != round(st.session_state.edit_lat, 6) or click_lon != round(st.session_state.edit_lon, 6):
+                    st.session_state.edit_lat = click_lat
+                    st.session_state.edit_lon = click_lon
                     st.rerun()
 
         with col_form:
@@ -255,9 +250,9 @@ elif modo == "Editor y Creación de Clientes":
             nueva_lat = st.number_input("Latitud", value=float(st.session_state.edit_lat), format="%.6f", key="input_edit_lat")
             nueva_lon = st.number_input("Longitud", value=float(st.session_state.edit_lon), format="%.6f", key="input_edit_lon")
             
-            if nueva_lat != st.session_state.edit_lat or nueva_lon != st.session_state.edit_lon:
-                st.session_state.edit_lat = nueva_lat
-                st.session_state.edit_lon = nueva_lon
+            if round(nueva_lat, 6) != round(st.session_state.edit_lat, 6) or round(nueva_lon, 6) != round(st.session_state.edit_lon, 6):
+                st.session_state.edit_lat = round(nueva_lat, 6)
+                st.session_state.edit_lon = round(nueva_lon, 6)
 
             usuario = st.text_input("Usuario responsable:", "Operador_Logistico", key="input_usuario")
             
