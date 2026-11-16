@@ -55,7 +55,6 @@ if modo == "Consulta y Asignación Rápida":
     lista_ids = [""] + sorted(df_clientes['IdCliente'].unique().tolist())
     id_buscado = st.selectbox("Seleccione o busque el ID de Cliente:", lista_ids, key="sel_consulta_id")
 
-    # Detectar cambio de cliente en consulta
     if 'prev_cons_id' not in st.session_state:
         st.session_state.prev_cons_id = ""
 
@@ -101,12 +100,15 @@ if modo == "Consulta y Asignación Rápida":
         st.write(f"**Razón Social:** {razon_social_txt}")
         st.write(f"**Dirección:** {direccion_txt}")
         
-        # Widgets conectados a session_state mediante key estática
-        lat_actual = st.number_input("Latitud", format="%.6f", key="cons_lat")
-        lon_actual = st.number_input("Longitud", format="%.6f", key="cons_lon")
+        lat_actual = st.number_input("Latitud", value=float(st.session_state.cons_lat), format="%.6f", key="input_cons_lat")
+        lon_actual = st.number_input("Longitud", value=float(st.session_state.cons_lon), format="%.6f", key="input_cons_lon")
         
+        if lat_actual != st.session_state.cons_lat or lon_actual != st.session_state.cons_lon:
+            st.session_state.cons_lat = lat_actual
+            st.session_state.cons_lon = lon_actual
+
         # --- MOTOR POINT-IN-POLYGON ---
-        punto = Point(lon_actual, lat_actual)
+        punto = Point(st.session_state.cons_lon, st.session_state.cons_lat)
         zona_encontrada = None
         id_zona_dis = None
         distribuidor_encontrado = None
@@ -131,7 +133,7 @@ if modo == "Consulta y Asignación Rápida":
 
     with col2:
         st.markdown("### 🗺️ Visualización Cartográfica")
-        m = folium.Map(location=[lat_actual, lon_actual], zoom_start=15)
+        m = folium.Map(location=[st.session_state.cons_lat, st.session_state.cons_lon], zoom_start=15)
         
         folium.GeoJson(
             geojson_data,
@@ -140,7 +142,7 @@ if modo == "Consulta y Asignación Rápida":
         ).add_to(m)
         
         folium.Marker(
-            [lat_actual, lon_actual],
+            [st.session_state.cons_lat, st.session_state.cons_lon],
             popup=f"ID: {id_buscado} - {razon_social_txt}",
             icon=folium.Icon(color="red", icon="user")
         ).add_to(m)
@@ -196,7 +198,6 @@ elif modo == "Editor y Creación de Clientes":
             row_data = {"IdCliente": id_objetivo, "Razon_Social": razon_social_val, "Direccion": direccion_val}
 
     if id_objetivo and id_objetivo != "":
-        # Detectar cambio de objetivo en el editor
         if 'prev_edit_target' not in st.session_state:
             st.session_state.prev_edit_target = ""
 
@@ -214,15 +215,45 @@ elif modo == "Editor y Creación de Clientes":
 
         col_form, col_map = st.columns([1, 1.5])
         
+        with col_map:
+            st.markdown("#### Mapa Interactivo (Haz clic para reubicar el pin)")
+            m_edit = folium.Map(location=[st.session_state.edit_lat, st.session_state.edit_lon], zoom_start=15)
+            
+            folium.GeoJson(
+                geojson_data,
+                name="Zonas RTM",
+                style_function=lambda x: {'fillColor': '#3388ff', 'color': '#3388ff', 'weight': 2, 'fillOpacity': 0.2}
+            ).add_to(m_edit)
+            
+            folium.Marker(
+                [st.session_state.edit_lat, st.session_state.edit_lon],
+                popup=f"ID: {id_objetivo} ({tipo_accion})",
+                icon=folium.Icon(color="green", icon="map-marker")
+            ).add_to(m_edit)
+            
+            map_edit_data = st_folium(m_edit, width=500, height=400, key="map_edit_static_key")
+            
+            if map_edit_data and map_edit_data.get("last_clicked"):
+                clicked_lat = map_edit_data["last_clicked"]["lat"]
+                clicked_lon = map_edit_data["last_clicked"]["lng"]
+                if clicked_lat != st.session_state.edit_lat or clicked_lon != st.session_state.edit_lon:
+                    st.session_state.edit_lat = clicked_lat
+                    st.session_state.edit_lon = clicked_lon
+                    st.rerun()
+
         with col_form:
             st.markdown("#### Coordenadas Activas")
-            nueva_lat = st.number_input("Latitud", format="%.6f", key="edit_lat")
-            nueva_lon = st.number_input("Longitud", format="%.6f", key="edit_lon")
+            nueva_lat = st.number_input("Latitud", value=float(st.session_state.edit_lat), format="%.6f", key="input_edit_lat")
+            nueva_lon = st.number_input("Longitud", value=float(st.session_state.edit_lon), format="%.6f", key="input_edit_lon")
             
+            if nueva_lat != st.session_state.edit_lat or nueva_lon != st.session_state.edit_lon:
+                st.session_state.edit_lat = nueva_lat
+                st.session_state.edit_lon = nueva_lon
+
             usuario = st.text_input("Usuario responsable:", "Operador_Logistico", key="input_usuario")
             
             # --- MOTOR POINT-IN-POLYGON ---
-            punto_edit = Point(nueva_lon, nueva_lat)
+            punto_edit = Point(st.session_state.edit_lon, st.session_state.edit_lat)
             zona_temp, id_zona_dis_temp, distribuidor_temp = "Fuera de cobertura", "Fuera de cobertura", "Ninguno"
             for feature in geojson_data['features']:
                 geom = shape(feature['geometry'])
@@ -244,8 +275,8 @@ elif modo == "Editor y Creación de Clientes":
                     "Cliente_ID": id_objetivo,
                     "Razon_Social": razon_social_val,
                     "Direccion": direccion_val,
-                    "Lat_Asignada": nueva_lat,
-                    "Lon_Asignada": nueva_lon,
+                    "Lat_Asignada": st.session_state.edit_lat,
+                    "Lon_Asignada": st.session_state.edit_lon,
                     "Id_Zona_Dis": id_zona_dis_temp,
                     "Distribuidor": distribuidor_temp,
                     "Usuario": usuario
@@ -255,32 +286,6 @@ elif modo == "Editor y Creación de Clientes":
                     st.session_state['correcciones'] = []
                 st.session_state['correcciones'].append(nuevo_registro)
                 st.success(f"¡Registro guardado exitosamente para el ID {id_objetivo}!")
-
-        with col_map:
-            st.markdown("#### Mapa Interactivo (Haz clic para reubicar el pin)")
-            m_edit = folium.Map(location=[nueva_lat, nueva_lon], zoom_start=15)
-            
-            folium.GeoJson(
-                geojson_data,
-                name="Zonas RTM",
-                style_function=lambda x: {'fillColor': '#3388ff', 'color': '#3388ff', 'weight': 2, 'fillOpacity': 0.2}
-            ).add_to(m_edit)
-            
-            folium.Marker(
-                [nueva_lat, nueva_lon],
-                popup=f"ID: {id_objetivo} ({tipo_accion})",
-                icon=folium.Icon(color="green", icon="map-marker")
-            ).add_to(m_edit)
-            
-            map_edit_data = st_folium(m_edit, width=500, height=400, key="map_edit_static_key")
-            
-            if map_edit_data and map_edit_data.get("last_clicked"):
-                clicked_lat = map_edit_data["last_clicked"]["lat"]
-                clicked_lon = map_edit_data["last_clicked"]["lng"]
-                if clicked_lat != st.session_state.edit_lat or clicked_lon != st.session_state.edit_lon:
-                    st.session_state.edit_lat = clicked_lat
-                    st.session_state.edit_lon = clicked_lon
-                    st.rerun()
 
         if 'correcciones' in st.session_state and len(st.session_state['correcciones']) > 0:
             st.markdown("---")
