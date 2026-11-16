@@ -55,20 +55,20 @@ if modo == "Consulta y Asignación Rápida":
     lista_ids = [""] + sorted(df_clientes['IdCliente'].unique().tolist())
     id_buscado = st.selectbox("Seleccione o busque el ID de Cliente:", lista_ids, key="sel_consulta_id")
 
-    # Inicializar estado para consulta si cambia de ID
-    if 'cons_id' not in st.session_state or st.session_state.cons_id != id_buscado:
-        st.session_state.cons_id = id_buscado
+    # Inicializar o actualizar coordenadas en session_state cuando cambia el selectbox
+    if 'last_sel_id' not in st.session_state or st.session_state.last_sel_id != id_buscado:
+        st.session_state.last_sel_id = id_buscado
         if id_buscado and id_buscado != "":
             res = df_clientes[df_clientes['IdCliente'] == str(id_buscado).strip()]
             if not res.empty:
-                st.session_state.cons_lat = float(str(res.iloc[0].get('Latitud', -16.528041)).replace(',', '.'))
-                st.session_state.cons_lon = float(str(res.iloc[0].get('Longitud', -68.104807)).replace(',', '.'))
+                st.session_state.q_lat = float(str(res.iloc[0].get('Latitud', -16.528041)).replace(',', '.'))
+                st.session_state.q_lon = float(str(res.iloc[0].get('Longitud', -68.104807)).replace(',', '.'))
             else:
-                st.session_state.cons_lat = -16.528041
-                st.session_state.cons_lon = -68.104807
+                st.session_state.q_lat = -16.528041
+                st.session_state.q_lon = -68.104807
         else:
-            st.session_state.cons_lat = -16.528041
-            st.session_state.cons_lon = -68.104807
+            st.session_state.q_lat = -16.528041
+            st.session_state.q_lon = -68.104807
 
     cliente_encontrado = None
     razon_social_txt = "N/A"
@@ -93,17 +93,12 @@ if modo == "Consulta y Asignación Rápida":
         st.write(f"**Razón Social:** {razon_social_txt}")
         st.write(f"**Dirección:** {direccion_txt}")
         
-        # Inputs sincronizados con el estado de sesión
-        lat_actual = st.number_input("Latitud", value=float(st.session_state.cons_lat), format="%.6f", key="q_lat")
-        lon_actual = st.number_input("Longitud", value=float(st.session_state.cons_lon), format="%.6f", key="q_lon")
+        # Inputs conectados directamente a session_state
+        lat_actual = st.number_input("Latitud", format="%.6f", key="q_lat")
+        lon_actual = st.number_input("Longitud", format="%.6f", key="q_lon")
         
-        # Actualizar estado si se modifican manualmente los números
-        if lat_actual != st.session_state.cons_lat or lon_actual != st.session_state.cons_lon:
-            st.session_state.cons_lat = lat_actual
-            st.session_state.cons_lon = lon_actual
-
         # --- MOTOR POINT-IN-POLYGON ---
-        punto = Point(st.session_state.cons_lon, st.session_state.cons_lat)
+        punto = Point(st.session_state.q_lon, st.session_state.q_lat)
         zona_encontrada = None
         id_zona_dis = None
         distribuidor_encontrado = None
@@ -128,7 +123,7 @@ if modo == "Consulta y Asignación Rápida":
 
     with col2:
         st.markdown("### 🗺️ Visualización Cartográfica")
-        m = folium.Map(location=[st.session_state.cons_lat, st.session_state.cons_lon], zoom_start=15)
+        m = folium.Map(location=[st.session_state.q_lat, st.session_state.q_lon], zoom_start=15)
         
         folium.GeoJson(
             geojson_data,
@@ -137,20 +132,20 @@ if modo == "Consulta y Asignación Rápida":
         ).add_to(m)
         
         folium.Marker(
-            [st.session_state.cons_lat, st.session_state.cons_lon],
+            [st.session_state.q_lat, st.session_state.q_lon],
             popup=f"ID: {id_buscado} - {razon_social_txt}",
             icon=folium.Icon(color="red", icon="user")
         ).add_to(m)
         
-        map_cons_data = st_folium(m, width=700, height=450, key=f"map_cons_{id_buscado}")
+        map_cons_data = st_folium(m, width=700, height=450, key=f"map_cons_{id_buscado}_{st.session_state.q_lat}_{st.session_state.q_lon}")
         
-        # Permitir clic en el mapa de consulta para mover el pin y actualizar coordenadas
+        # Actualizar coordenadas si se hace clic en el mapa
         if map_cons_data and map_cons_data.get("last_clicked"):
             cl_lat = map_cons_data["last_clicked"]["lat"]
             cl_lon = map_cons_data["last_clicked"]["lng"]
-            if cl_lat != st.session_state.cons_lat or cl_lon != st.session_state.cons_lon:
-                st.session_state.cons_lat = cl_lat
-                st.session_state.cons_lon = cl_lon
+            if cl_lat != st.session_state.q_lat or cl_lon != st.session_state.q_lon:
+                st.session_state.q_lat = cl_lat
+                st.session_state.q_lon = cl_lon
                 st.rerun()
 
 # ==========================================
@@ -194,7 +189,7 @@ elif modo == "Editor y Creación de Clientes":
             row_data = {"IdCliente": id_objetivo, "Razon_Social": razon_social_val, "Direccion": direccion_val}
 
     if id_objetivo and id_objetivo != "":
-        # Inicializar estado de sesión para edición al cambiar de objetivo
+        # Inicializar o actualizar lat/lon en session_state al cambiar de cliente/objetivo
         if 'curr_target' not in st.session_state or st.session_state.curr_target != id_objetivo:
             st.session_state.curr_target = id_objetivo
             st.session_state.edit_lat = default_lat
@@ -206,14 +201,9 @@ elif modo == "Editor y Creación de Clientes":
         
         with col_form:
             st.markdown("#### Coordenadas Activas")
-            # Inputs dinámicos sincronizados con session_state sin restricciones de formulario estático
-            nueva_lat = st.number_input("Latitud", value=float(st.session_state.edit_lat), format="%.6f", key="input_lat_dyn")
-            nueva_lon = st.number_input("Longitud", value=float(st.session_state.edit_lon), format="%.6f", key="input_lon_dyn")
+            nueva_lat = st.number_input("Latitud", format="%.6f", key="edit_lat")
+            nueva_lon = st.number_input("Longitud", format="%.6f", key="edit_lon")
             
-            if nueva_lat != st.session_state.edit_lat or nueva_lon != st.session_state.edit_lon:
-                st.session_state.edit_lat = nueva_lat
-                st.session_state.edit_lon = nueva_lon
-
             usuario = st.text_input("Usuario responsable:", "Operador_Logistico", key="input_usuario")
             
             # Evaluación espacial en tiempo real
@@ -267,7 +257,7 @@ elif modo == "Editor y Creación de Clientes":
                 icon=folium.Icon(color="green", icon="map-marker")
             ).add_to(m_edit)
             
-            map_data = st_folium(m_edit, width=500, height=400, key=f"map_edit_{id_objetivo}")
+            map_data = st_folium(m_edit, width=500, height=400, key=f"map_edit_{id_objetivo}_{st.session_state.edit_lat}_{st.session_state.edit_lon}")
             
             if map_data and map_data.get("last_clicked"):
                 clicked_lat = map_data["last_clicked"]["lat"]
