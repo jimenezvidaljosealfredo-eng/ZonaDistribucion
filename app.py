@@ -76,6 +76,10 @@ if modo == "Consulta y Asignación Rápida":
         st.session_state.cons_lat = -16.528041
     if 'cons_lon' not in st.session_state:
         st.session_state.cons_lon = -68.104807
+    if 'cons_last_click_lat' not in st.session_state:
+        st.session_state.cons_last_click_lat = None
+    if 'cons_last_click_lon' not in st.session_state:
+        st.session_state.cons_last_click_lon = None
 
     cliente_encontrado = None
     razon_social_txt = "N/A"
@@ -149,10 +153,13 @@ if modo == "Consulta y Asignación Rápida":
         
         map_cons_data = st_folium(m, width=700, height=450, key="map_cons_static_key")
         
+        # Validación antirrebote para clics en el mapa
         if map_cons_data and map_cons_data.get("last_clicked"):
             cl_lat = map_cons_data["last_clicked"]["lat"]
             cl_lon = map_cons_data["last_clicked"]["lng"]
-            if cl_lat != st.session_state.cons_lat or cl_lon != st.session_state.cons_lon:
+            if cl_lat != st.session_state.cons_last_click_lat or cl_lon != st.session_state.cons_last_click_lon:
+                st.session_state.cons_last_click_lat = cl_lat
+                st.session_state.cons_last_click_lon = cl_lon
                 st.session_state.cons_lat = cl_lat
                 st.session_state.cons_lon = cl_lon
                 st.rerun()
@@ -205,11 +212,17 @@ elif modo == "Editor y Creación de Clientes":
             st.session_state.prev_edit_target = id_objetivo
             st.session_state.edit_lat = default_lat
             st.session_state.edit_lon = default_lon
+            st.session_state.edit_last_click_lat = None
+            st.session_state.edit_last_click_lon = None
 
         if 'edit_lat' not in st.session_state:
             st.session_state.edit_lat = default_lat
         if 'edit_lon' not in st.session_state:
             st.session_state.edit_lon = default_lon
+        if 'edit_last_click_lat' not in st.session_state:
+            st.session_state.edit_last_click_lat = None
+        if 'edit_last_click_lon' not in st.session_state:
+            st.session_state.edit_last_click_lon = None
 
         st.info(f"**Operando sobre ID:** {id_objetivo} | **Cliente:** {razon_social_val or 'Nuevo'}")
 
@@ -233,10 +246,13 @@ elif modo == "Editor y Creación de Clientes":
             
             map_edit_data = st_folium(m_edit, width=500, height=400, key="map_edit_static_key")
             
+            # Validación antirrebote para clics en el mapa del editor
             if map_edit_data and map_edit_data.get("last_clicked"):
                 clicked_lat = map_edit_data["last_clicked"]["lat"]
                 clicked_lon = map_edit_data["last_clicked"]["lng"]
-                if clicked_lat != st.session_state.edit_lat or clicked_lon != st.session_state.edit_lon:
+                if clicked_lat != st.session_state.edit_last_click_lat or clicked_lon != st.session_state.edit_last_click_lon:
+                    st.session_state.edit_last_click_lat = clicked_lat
+                    st.session_state.edit_last_click_lon = clicked_lon
                     st.session_state.edit_lat = clicked_lat
                     st.session_state.edit_lon = clicked_lon
                     st.rerun()
