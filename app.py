@@ -5,7 +5,6 @@ from shapely.geometry import Point, shape
 import folium
 from streamlit_folium import st_folium
 
-# Corrección aplicada: st.set_page_config en lugar de st.set_page_title
 st.set_page_config(
     page_title="Gestión Comercial y Logística RTM",
     page_icon="🗺️",
@@ -17,7 +16,6 @@ st.markdown("Cruza automáticamente la ubicación de tus clientes con los políg
 
 @st.cache_data
 def load_data():
-    # Cargar CSV de clientes con manejo de errores de encoding
     df_clientes = None
     for enc in ['latin-1', 'utf-8', 'cp1252']:
         try:
@@ -30,7 +28,6 @@ def load_data():
             except Exception:
                 continue
                 
-    # Cargar GeoJSON
     with open('MapaDistibucion LPZPrueba.geojson', 'r', encoding='utf-8') as f:
         geojson_data = json.load(f)
         
@@ -47,13 +44,13 @@ st.sidebar.header("Panel de Control")
 modo = st.sidebar.radio("Selecciona una opción:", ["Consulta y Asignación Automática", "Editor de Coordenadas y Bitácora"])
 
 if modo == "Consulta y Asignación Automática":
-    st.subheader("🔍 Búsqueda de Cliente y Asignación de Distribuidor")
+    st.subheader("🔍 Búsqueda por ID de Cliente y Asignación de Distribuidor")
     
-    # Selector de cliente
-    cliente_opciones = df_clientes['Razon_Social'].unique()
-    cliente_seleccionado = st.selectbox("Seleccione o busque un Cliente:", cliente_opciones)
+    # Selector basado en IdCliente (convertido a string para evitar problemas de tipos)
+    cliente_opciones = df_clientes['IdCliente'].astype(str).unique()
+    cliente_seleccionado = st.selectbox("Seleccione o busque el ID de Cliente:", cliente_opciones)
     
-    cliente_data = df_clientes[df_clientes['Razon_Social'] == cliente_seleccionado].iloc[0]
+    cliente_data = df_clientes[df_clientes['IdCliente'].astype(str) == str(cliente_seleccionado)].iloc[0]
     
     col1, col2 = st.columns([1, 2])
     
@@ -69,7 +66,7 @@ if modo == "Consulta y Asignación Automática":
         st.write(f"**Latitud:** {lat_actual}")
         st.write(f"**Longitud:** {lon_actual}")
         
-        # Motor Point-in-Polygon (Shapely requiere (longitud, latitud))
+        # Motor Point-in-Polygon
         punto = Point(lon_actual, lat_actual)
         zona_encontrada = None
         distribuidor_encontrado = None
@@ -92,30 +89,30 @@ if modo == "Consulta y Asignación Automática":
         st.markdown("### Visualización Cartográfica")
         m = folium.Map(location=[lat_actual, lon_actual], zoom_start=14)
         
-        # Agregar polígonos del GeoJSON
         folium.GeoJson(
             geojson_data,
             name="Zonas RTM",
             style_function=lambda x: {'fillColor': '#3388ff', 'color': '#3388ff', 'weight': 2, 'fillOpacity': 0.2}
         ).add_to(m)
         
-        # Marcar la posición del cliente
         folium.Marker(
             [lat_actual, lon_actual],
-            popup=f"{cliente_seleccionado}",
+            popup=f"ID: {cliente_seleccionado} - {cliente_data.get('Razon_Social', '')}",
             icon=folium.Icon(color="red", icon="user")
         ).add_to(m)
         
         st_folium(m, width=700, height=450)
 
 elif modo == "Editor de Coordenadas y Bitácora":
-    st.subheader("📝 Corrección de Georreferenciación")
-    st.markdown("Modifica las coordenadas del cliente y registra el cambio para su sincronización.")
+    st.subheader("📝 Corrección de Georreferenciación por ID de Cliente")
+    st.markdown("Modifica las coordenadas de un cliente buscándolo por su ID y registra el cambio.")
     
-    cliente_opciones = df_clientes['Razon_Social'].unique()
-    cliente_sel = st.selectbox("Cliente a corregir:", cliente_opciones, key="edit_client")
+    cliente_opciones = df_clientes['IdCliente'].astype(str).unique()
+    cliente_sel = st.selectbox("Seleccione el ID de Cliente a corregir:", cliente_opciones, key="edit_client")
     
-    row_data = df_clientes[df_clientes['Razon_Social'] == cliente_sel].iloc[0]
+    row_data = df_clientes[df_clientes['IdCliente'].astype(str) == str(cliente_sel)].iloc[0]
+    
+    st.info(f"**Cliente seleccionado:** {row_data.get('Razon_Social', 'N/A')} | **Dirección:** {row_data.get('Direccion', 'N/A')}")
     
     orig_lat = float(str(row_data.get('Latitud', 0)).replace(',', '.'))
     orig_lon = float(str(row_data.get('Longitud', 0)).replace(',', '.'))
@@ -134,8 +131,8 @@ elif modo == "Editor de Coordenadas y Bitácora":
         if submitted:
             nuevo_registro = {
                 "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Cliente_ID": row_data.get('IdCliente'),
-                "Razon_Social": cliente_sel,
+                "Cliente_ID": cliente_sel,
+                "Razon_Social": row_data.get('Razon_Social'),
                 "Lat_Original": orig_lat,
                 "Lon_Original": orig_lon,
                 "Lat_Corregida": nueva_lat,
@@ -147,7 +144,7 @@ elif modo == "Editor de Coordenadas y Bitácora":
                 st.session_state['correcciones'] = []
             st.session_state['correcciones'].append(nuevo_registro)
             
-            st.success("¡Corrección registrada exitosamente en la sesión actual!")
+            st.success(f"¡Corrección registrada exitosamente para el ID {cliente_sel}!")
 
     if 'correcciones' in st.session_state and len(st.session_state['correcciones']) > 0:
         st.markdown("### Historial de Correcciones en la Sesión Actual")
