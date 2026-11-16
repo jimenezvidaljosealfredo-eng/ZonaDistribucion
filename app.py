@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🗺️ Herramienta RTM: Asignación Espacial y Corrección de Clientes")
-st.markdown("Consulta rápida por **ID de Cliente** (sin listas desplegables) con análisis espacial instantáneo.")
+st.markdown("Consulta y edición geoespacial con soporte para clientes existentes y nuevos registros diarios.")
 
 @st.cache_data
 def load_data():
@@ -39,47 +39,52 @@ except Exception as e:
     st.error(f"Error cargando los archivos de datos locales: {e}")
     st.stop()
 
-# Asegurar que IdCliente sea string para búsquedas limpias
+# Asegurar IdCliente como string
 df_clientes['IdCliente'] = df_clientes['IdCliente'].astype(str)
 
 # Sidebar para navegación
 st.sidebar.header("Panel de Control")
-modo = st.sidebar.radio("Selecciona una modo:", ["Consulta y Asignación Rápida", "Editor de Coordenadas y Bitácora"])
+modo = st.sidebar.radio("Selecciona una opción:", ["Consulta y Asignación Rápida", "Editor y Creación de Clientes"])
 
+# ==========================================
+# PESTAÑA 1: CONSULTA Y ASIGNACIÓN RÁPIDA
+# ==========================================
 if modo == "Consulta y Asignación Rápida":
-    st.subheader("🔍 Búsqueda Directa por ID de Cliente")
+    st.subheader("🔍 Consulta Dinámica por ID de Cliente")
     
-    # ENFOQUE SIN LISTA DESPLEGABLE: Caja de texto libre para ingresar el ID
-    col_search, col_info = st.columns([1, 2])
-    with col_search:
-        id_buscado = st.text_input("Ingrese el ID de Cliente:", value="", placeholder="Ej: 100014")
+    lista_ids = [""] + sorted(df_clientes['IdCliente'].unique().tolist())
+    id_buscado = st.selectbox("Seleccione o busque el ID de Cliente:", lista_ids, key="sel_consulta_id")
 
-    # Valores por defecto (centro de La Paz si no se encuentra o está vacío)
+    # Valores por defecto (Centro de La Paz)
     lat_val = -16.528041
     lon_val = -68.104807
     cliente_encontrado = None
 
-    if id_buscado:
-        resultado = df_clientes[df_clientes['IdCliente'] == id_buscado.strip()]
+    if id_buscado and id_buscado != "":
+        resultado = df_clientes[df_clientes['IdCliente'] == str(id_buscado).strip()]
         if not resultado.empty:
             cliente_encontrado = resultado.iloc[0]
             lat_val = float(str(cliente_encontrado.get('Latitud', lat_val)).replace(',', '.'))
             lon_val = float(str(cliente_encontrado.get('Longitud', lon_val)).replace(',', '.'))
-            with col_info:
-                st.success(f"Cliente encontrado: **{cliente_encontrado.get('Razon_Social', 'N/A')}**")
-        else:
-            with col_info:
-                st.warning("⚠️ ID de Cliente no encontrado en la base de datos. Se usan coordenadas neutrales o puede buscarlas libremente.")
 
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.markdown("### 📋 Datos del Registro")
-        if cliente_encontrado is not None:
-            st.write(f"**Razón Social:** {cliente_encontrado.get('Razon_Social', 'N/A')}")
-            st.write(f"**Dirección:** {cliente_encontrado.get('Direccion', 'N/A')}")
+        st.markdown("### 📋 Datos del Cliente")
+        razon_social_txt = "N/A"
+        direccion_txt = "N/A"
         
-        # Coordenadas editables manualmente para prueba rápida
+        if cliente_encontrado is not None:
+            razon_social_txt = cliente_encontrado.get('Razon_Social', 'N/A')
+            direccion_txt = cliente_encontrado.get('Direccion', 'N/A')
+            st.success(f"Encontrado: **{razon_social_txt}**")
+        else:
+            st.info("Seleccione un ID de cliente válido para cargar sus datos.")
+
+        st.write(f"**Razón Social:** {razon_social_txt}")
+        st.write(f"**Dirección:** {direccion_txt}")
+        
+        # Campos sincronizados para visualizar/ajustar
         lat_actual = st.number_input("Latitud", value=lat_val, format="%.6f", key="q_lat")
         lon_actual = st.number_input("Longitud", value=lon_val, format="%.6f", key="q_lon")
         
@@ -98,7 +103,6 @@ if modo == "Consulta y Asignación Rápida":
                 distribuidor_encontrado = props.get('PROVEEDOR_RTM') or props.get('distribuidor')
                 break
                 
-        # --- CUADRO DINÁMICO DE ZONA Y DISTRIBUIDOR ---
         st.markdown("### 🎯 Cuadro de Asignación Territorial")
         if id_zona_dis or zona_encontrada:
             st.info(f"""
@@ -110,7 +114,7 @@ if modo == "Consulta y Asignación Rápida":
 
     with col2:
         st.markdown("### 🗺️ Visualización Cartográfica")
-        m = folium.Map(location=[lat_actual, lon_actual], zoom_start=14)
+        m = folium.Map(location=[lat_actual, lon_actual], zoom_start=15)
         
         folium.GeoJson(
             geojson_data,
@@ -120,49 +124,85 @@ if modo == "Consulta y Asignación Rápida":
         
         folium.Marker(
             [lat_actual, lon_actual],
-            popup=f"Ubicación Consultada",
+            popup=f"ID: {id_buscado} - {razon_social_txt}",
             icon=folium.Icon(color="red", icon="user")
         ).add_to(m)
         
-        # Renderizado optimizado del mapa
-        st_folium(m, width=700, height=450, key="map_consulta")
+        st_folium(m, width=700, height=450, key=f"map_cons_{id_buscado}_{lat_actual}_{lon_actual}")
 
-elif modo == "Editor de Coordenadas y Bitácora":
-    st.subheader("📝 Corrección Interactiva de Georreferenciación por ID")
-    st.markdown("Escriba el ID del cliente o mueva el marcador en el mapa para actualizar las coordenadas con menor retraso.")
+# ==========================================
+# PESTAÑA 2: EDITOR Y CREACIÓN DE CLIENTES
+# ==========================================
+elif modo == "Editor y Creación de Clientes":
+    st.subheader("📝 Gestión de Corrección y Creación Diario")
     
-    col_e1, col_e2 = st.columns([1, 2])
-    with col_e1:
-        id_edit = st.text_input("Ingrese ID de Cliente a corregir:", value="", placeholder="Ej: 100018")
+    tipo_accion = st.radio("Seleccione el flujo de trabajo:", ["Modificar Cliente Existente", "Registrar Nuevo Cliente"], horizontal=True)
     
     row_data = None
-    if id_edit:
-        res_edit = df_clientes[df_clientes['IdCliente'] == id_edit.strip()]
-        if not res_edit.empty:
-            row_data = res_edit.iloc[0]
-
-    if row_data is not None:
-        orig_lat = float(str(row_data.get('Latitud', -16.528041)).replace(',', '.'))
-        orig_lon = float(str(row_data.get('Longitud', -68.104807)).replace(',', '.'))
+    id_objetivo = ""
+    
+    if tipo_accion == "Modificar Cliente Existente":
+        lista_ids_edit = [""] + sorted(df_clientes['IdCliente'].unique().tolist())
+        id_objetivo = st.selectbox("Seleccione el ID de Cliente existente a modificar:", lista_ids_edit, key="sel_edit_id")
         
-        # Control de estado para evitar bucles de retraso en el mapa
-        if 'edit_lat' not in st.session_state or st.session_state.get('last_id') != id_edit:
-            st.session_state.edit_lat = orig_lat
-            st.session_state.edit_lon = orig_lon
-            st.session_state.last_id = id_edit
-
-        st.info(f"**Cliente:** {row_data.get('Razon_Social', 'N/A')} | **Dirección:** {row_data.get('Direccion', 'N/A')}")
+        if id_objetivo and id_objetivo != "":
+            res_edit = df_clientes[df_clientes['IdCliente'] == str(id_objetivo).strip()]
+            if not res_edit.empty:
+                row_data = res_edit.iloc[0]
+                
+        if row_data is not None:
+            default_lat = float(str(row_data.get('Latitud', -16.528041)).replace(',', '.'))
+            default_lon = float(str(row_data.get('Longitud', -68.104807)).replace(',', '.'))
+            razon_social_val = row_data.get('Razon_Social', 'N/A')
+            direccion_val = row_data.get('Direccion', 'N/A')
+        else:
+            default_lat, default_lon = -16.528041, -68.104807
+            razon_social_val, direccion_val = "", ""
+            
+    else:  # Registrar Nuevo Cliente
+        st.markdown("#### Ingresar Datos del Nuevo Cliente")
+        id_objetivo = st.text_input("Nuevo Código de Cliente (IdCliente):", placeholder="Ej: 999888")
+        razon_social_val = st.text_input("Razón Social / Nombre Comercial:", placeholder="Ej: TIENDA NUEVA")
+        direccion_val = st.text_input("Dirección física:", placeholder="Ej: Av. Principal Nro 123")
+        default_lat = st.number_input("Latitud Inicial", value=-16.528041, format="%.6f")
+        default_lon = st.number_input("Longitud Inicial", value=-68.104807, format="%.6f")
         
+        if id_objetivo:
+            row_data = {"IdCliente": id_objetivo, "Razon_Social": razon_social_val, "Direccion": direccion_val}
+
+    if id_objetivo and id_objetivo != "":
+        # Inicializar estado para edición/creación fluida
+        if 'edit_lat' not in st.session_state or st.session_state.get('curr_target') != id_objetivo:
+            st.session_state.edit_lat = default_lat
+            st.session_state.edit_lon = default_lon
+            st.session_state.curr_target = id_objetivo
+
+        st.info(f"**Operando sobre ID:** {id_objetivo} | **Cliente:** {razon_social_val}")
+
         col_form, col_map = st.columns([1, 1.5])
         
         with col_form:
-            with st.form("form_correccion"):
-                st.markdown("#### Coordenadas Editables")
+            with st.form("form_correccion_creacion"):
+                st.markdown("#### Coordenadas Activas")
                 nueva_lat = st.number_input("Latitud", value=float(st.session_state.edit_lat), format="%.6f", key="input_lat")
                 nueva_lon = st.number_input("Longitud", value=float(st.session_state.edit_lon), format="%.6f", key="input_lon")
                 usuario = st.text_input("Usuario responsable:", "Operador_Logistico")
                 
-                submitted = st.form_submit_button("Guardar Corrección")
+                # Evaluación espacial previa al guardar
+                punto_edit = Point(nueva_lon, nueva_lat)
+                zona_temp, distribuidor_temp = "Fuera de cobertura", "Ninguno"
+                for feature in geojson_data['features']:
+                    geom = shape(feature['geometry'])
+                    if geom.contains(punto_edit):
+                        props = feature['properties']
+                        zona_temp = props.get('ORIG_IdZonaDist') or props.get('idZonaDis') or props.get('CODIGO_ZONA_RTM')
+                        distribuidor_temp = props.get('PROVEEDOR_RTM') or props.get('distribuidor')
+                        break
+                
+                st.markdown(f"**Zona Detectada:** `{zona_temp}`")
+                st.markdown(f"**Distribuidor:** `{distribuidor_temp}`")
+                
+                submitted = st.form_submit_button("Guardar Registro / Corrección")
                 
                 if submitted:
                     st.session_state.edit_lat = nueva_lat
@@ -170,22 +210,24 @@ elif modo == "Editor de Coordenadas y Bitácora":
                     
                     nuevo_registro = {
                         "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "Cliente_ID": id_edit,
-                        "Razon_Social": row_data.get('Razon_Social'),
-                        "Lat_Original": orig_lat,
-                        "Lon_Original": orig_lon,
-                        "Lat_Corregida": nueva_lat,
-                        "Lon_Corregida": nueva_lon,
+                        "Tipo_Operacion": tipo_accion,
+                        "Cliente_ID": id_objetivo,
+                        "Razon_Social": razon_social_val,
+                        "Direccion": direccion_val,
+                        "Lat_Asignada": nueva_lat,
+                        "Lon_Asignada": nueva_lon,
+                        "Zona_Asignada": zona_temp,
+                        "Distribuidor": distribuidor_temp,
                         "Usuario": usuario
                     }
                     
                     if 'correcciones' not in st.session_state:
                         st.session_state['correcciones'] = []
                     st.session_state['correcciones'].append(nuevo_registro)
-                    st.success(f"¡Corrección guardada para el ID {id_edit}!")
+                    st.success(f"¡Registro guardado exitosamente para el ID {id_objetivo}!")
 
         with col_map:
-            st.markdown("#### Mapa Interactivo de Ajuste")
+            st.markdown("#### Mapa Interactivo (Haz clic para reubicar el pin)")
             m_edit = folium.Map(location=[st.session_state.edit_lat, st.session_state.edit_lon], zoom_start=15)
             
             folium.GeoJson(
@@ -196,13 +238,12 @@ elif modo == "Editor de Coordenadas y Bitácora":
             
             folium.Marker(
                 [st.session_state.edit_lat, st.session_state.edit_lon],
-                popup=f"ID: {id_edit}",
+                popup=f"ID: {id_objetivo} ({tipo_accion})",
                 icon=folium.Icon(color="green", icon="map-marker")
             ).add_to(m_edit)
             
-            map_data = st_folium(m_edit, width=500, height=400, key=f"map_edit_{id_edit}")
+            map_data = st_folium(m_edit, width=500, height=400, key=f"map_edit_{id_objetivo}")
             
-            # Captura optimizada de clic en el mapa
             if map_data and map_data.get("last_clicked"):
                 clicked_lat = map_data["last_clicked"]["lat"]
                 clicked_lon = map_data["last_clicked"]["lng"]
@@ -213,9 +254,8 @@ elif modo == "Editor de Coordenadas y Bitácora":
 
         if 'correcciones' in st.session_state and len(st.session_state['correcciones']) > 0:
             st.markdown("---")
-            st.markdown("### Historial de Correcciones en la Sesión")
+            st.markdown("### Historial de Bitácora (Sesión Actual)")
             df_corr = pd.DataFrame(st.session_state['correcciones'])
             st.dataframe(df_corr)
     else:
-        if id_edit:
-            st.warning("Ingrese un ID válido existente en el archivo CSV para comenzar la edición.")
+        st.warning("Seleccione un cliente existente o ingrese un nuevo código de cliente para comenzar.")
