@@ -5,7 +5,12 @@ from shapely.geometry import Point, shape
 import folium
 from streamlit_folium import st_folium
 
-st.set_page_title("Gestión Comercial y Logística RTM", layout="wide")
+# Corrección aplicada: st.set_page_config en lugar de st.set_page_title
+st.set_page_config(
+    page_title="Gestión Comercial y Logística RTM",
+    page_icon="🗺️",
+    layout="wide"
+)
 
 st.title("🗺️ Herramienta RTM: Asignación Espacial y Corrección de Clientes")
 st.markdown("Cruza automáticamente la ubicación de tus clientes con los polígonos de distribución (GeoJSON) y gestiona correcciones.")
@@ -64,7 +69,7 @@ if modo == "Consulta y Asignación Automática":
         st.write(f"**Latitud:** {lat_actual}")
         st.write(f"**Longitud:** {lon_actual}")
         
-        # Motor Point-in-Polygon
+        # Motor Point-in-Polygon (Shapely requiere (longitud, latitud))
         punto = Point(lon_actual, lat_actual)
         zona_encontrada = None
         distribuidor_encontrado = None
@@ -75,7 +80,6 @@ if modo == "Consulta y Asignación Automática":
                 props = feature['properties']
                 zona_encontrada = props.get('CODIGO_ZONA_RTM') or props.get('id_zona')
                 distribuidor_encontrado = props.get('PROVEEDOR_RTM') or props.get('distribuidor')
-                etiqueta = props.get('ETIQUETA_RTM', '')
                 break
                 
         st.markdown("### Resultado de Asignación")
@@ -139,12 +143,11 @@ elif modo == "Editor de Coordenadas y Bitácora":
                 "Usuario": usuario
             }
             
-            # Guardado local temporal en sesión para visualización inmediata
             if 'correcciones' not in st.session_state:
                 st.session_state['correcciones'] = []
             st.session_state['correcciones'].append(nuevo_registro)
             
-            st.success("¡Corrección registrada exitosamente para sincronización con Google Sheets / ERP!")
+            st.success("¡Corrección registrada exitosamente en la sesión actual!")
 
     if 'correcciones' in st.session_state and len(st.session_state['correcciones']) > 0:
         st.markdown("### Historial de Correcciones en la Sesión Actual")
