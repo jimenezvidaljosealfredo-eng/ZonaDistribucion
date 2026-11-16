@@ -55,20 +55,28 @@ if modo == "Consulta y Asignación Rápida":
     lista_ids = [""] + sorted(df_clientes['IdCliente'].unique().tolist())
     id_buscado = st.selectbox("Seleccione o busque el ID de Cliente:", lista_ids, key="sel_consulta_id")
 
-    # Inicializar o actualizar coordenadas en session_state cuando cambia el selectbox
-    if 'last_sel_id' not in st.session_state or st.session_state.last_sel_id != id_buscado:
-        st.session_state.last_sel_id = id_buscado
+    # Detectar cambio de cliente en consulta
+    if 'prev_cons_id' not in st.session_state:
+        st.session_state.prev_cons_id = ""
+
+    if id_buscado != st.session_state.prev_cons_id:
+        st.session_state.prev_cons_id = id_buscado
         if id_buscado and id_buscado != "":
             res = df_clientes[df_clientes['IdCliente'] == str(id_buscado).strip()]
             if not res.empty:
-                st.session_state.q_lat = float(str(res.iloc[0].get('Latitud', -16.528041)).replace(',', '.'))
-                st.session_state.q_lon = float(str(res.iloc[0].get('Longitud', -68.104807)).replace(',', '.'))
+                st.session_state.cons_lat = float(str(res.iloc[0].get('Latitud', -16.528041)).replace(',', '.'))
+                st.session_state.cons_lon = float(str(res.iloc[0].get('Longitud', -68.104807)).replace(',', '.'))
             else:
-                st.session_state.q_lat = -16.528041
-                st.session_state.q_lon = -68.104807
+                st.session_state.cons_lat = -16.528041
+                st.session_state.cons_lon = -68.104807
         else:
-            st.session_state.q_lat = -16.528041
-            st.session_state.q_lon = -68.104807
+            st.session_state.cons_lat = -16.528041
+            st.session_state.cons_lon = -68.104807
+
+    if 'cons_lat' not in st.session_state:
+        st.session_state.cons_lat = -16.528041
+    if 'cons_lon' not in st.session_state:
+        st.session_state.cons_lon = -68.104807
 
     cliente_encontrado = None
     razon_social_txt = "N/A"
@@ -93,12 +101,12 @@ if modo == "Consulta y Asignación Rápida":
         st.write(f"**Razón Social:** {razon_social_txt}")
         st.write(f"**Dirección:** {direccion_txt}")
         
-        # Inputs conectados directamente a session_state
-        lat_actual = st.number_input("Latitud", format="%.6f", key="q_lat")
-        lon_actual = st.number_input("Longitud", format="%.6f", key="q_lon")
+        # Widgets conectados a session_state mediante key estática
+        lat_actual = st.number_input("Latitud", format="%.6f", key="cons_lat")
+        lon_actual = st.number_input("Longitud", format="%.6f", key="cons_lon")
         
         # --- MOTOR POINT-IN-POLYGON ---
-        punto = Point(st.session_state.q_lon, st.session_state.q_lat)
+        punto = Point(lon_actual, lat_actual)
         zona_encontrada = None
         id_zona_dis = None
         distribuidor_encontrado = None
@@ -123,7 +131,7 @@ if modo == "Consulta y Asignación Rápida":
 
     with col2:
         st.markdown("### 🗺️ Visualización Cartográfica")
-        m = folium.Map(location=[st.session_state.q_lat, st.session_state.q_lon], zoom_start=15)
+        m = folium.Map(location=[lat_actual, lon_actual], zoom_start=15)
         
         folium.GeoJson(
             geojson_data,
@@ -132,20 +140,19 @@ if modo == "Consulta y Asignación Rápida":
         ).add_to(m)
         
         folium.Marker(
-            [st.session_state.q_lat, st.session_state.q_lon],
+            [lat_actual, lon_actual],
             popup=f"ID: {id_buscado} - {razon_social_txt}",
             icon=folium.Icon(color="red", icon="user")
         ).add_to(m)
         
-        map_cons_data = st_folium(m, width=700, height=450, key=f"map_cons_{id_buscado}_{st.session_state.q_lat}_{st.session_state.q_lon}")
+        map_cons_data = st_folium(m, width=700, height=450, key="map_cons_static_key")
         
-        # Actualizar coordenadas si se hace clic en el mapa
         if map_cons_data and map_cons_data.get("last_clicked"):
             cl_lat = map_cons_data["last_clicked"]["lat"]
             cl_lon = map_cons_data["last_clicked"]["lng"]
-            if cl_lat != st.session_state.q_lat or cl_lon != st.session_state.q_lon:
-                st.session_state.q_lat = cl_lat
-                st.session_state.q_lon = cl_lon
+            if cl_lat != st.session_state.cons_lat or cl_lon != st.session_state.cons_lon:
+                st.session_state.cons_lat = cl_lat
+                st.session_state.cons_lon = cl_lon
                 st.rerun()
 
 # ==========================================
@@ -189,10 +196,18 @@ elif modo == "Editor y Creación de Clientes":
             row_data = {"IdCliente": id_objetivo, "Razon_Social": razon_social_val, "Direccion": direccion_val}
 
     if id_objetivo and id_objetivo != "":
-        # Inicializar o actualizar lat/lon en session_state al cambiar de cliente/objetivo
-        if 'curr_target' not in st.session_state or st.session_state.curr_target != id_objetivo:
-            st.session_state.curr_target = id_objetivo
+        # Detectar cambio de objetivo en el editor
+        if 'prev_edit_target' not in st.session_state:
+            st.session_state.prev_edit_target = ""
+
+        if id_objetivo != st.session_state.prev_edit_target:
+            st.session_state.prev_edit_target = id_objetivo
             st.session_state.edit_lat = default_lat
+            st.session_state.edit_lon = default_lon
+
+        if 'edit_lat' not in st.session_state:
+            st.session_state.edit_lat = default_lat
+        if 'edit_lon' not in st.session_state:
             st.session_state.edit_lon = default_lon
 
         st.info(f"**Operando sobre ID:** {id_objetivo} | **Cliente:** {razon_social_val or 'Nuevo'}")
@@ -206,8 +221,8 @@ elif modo == "Editor y Creación de Clientes":
             
             usuario = st.text_input("Usuario responsable:", "Operador_Logistico", key="input_usuario")
             
-            # Evaluación espacial en tiempo real
-            punto_edit = Point(st.session_state.edit_lon, st.session_state.edit_lat)
+            # --- MOTOR POINT-IN-POLYGON ---
+            punto_edit = Point(nueva_lon, nueva_lat)
             zona_temp, id_zona_dis_temp, distribuidor_temp = "Fuera de cobertura", "Fuera de cobertura", "Ninguno"
             for feature in geojson_data['features']:
                 geom = shape(feature['geometry'])
@@ -229,8 +244,8 @@ elif modo == "Editor y Creación de Clientes":
                     "Cliente_ID": id_objetivo,
                     "Razon_Social": razon_social_val,
                     "Direccion": direccion_val,
-                    "Lat_Asignada": st.session_state.edit_lat,
-                    "Lon_Asignada": st.session_state.edit_lon,
+                    "Lat_Asignada": nueva_lat,
+                    "Lon_Asignada": nueva_lon,
                     "Id_Zona_Dis": id_zona_dis_temp,
                     "Distribuidor": distribuidor_temp,
                     "Usuario": usuario
@@ -243,7 +258,7 @@ elif modo == "Editor y Creación de Clientes":
 
         with col_map:
             st.markdown("#### Mapa Interactivo (Haz clic para reubicar el pin)")
-            m_edit = folium.Map(location=[st.session_state.edit_lat, st.session_state.edit_lon], zoom_start=15)
+            m_edit = folium.Map(location=[nueva_lat, nueva_lon], zoom_start=15)
             
             folium.GeoJson(
                 geojson_data,
@@ -252,16 +267,16 @@ elif modo == "Editor y Creación de Clientes":
             ).add_to(m_edit)
             
             folium.Marker(
-                [st.session_state.edit_lat, st.session_state.edit_lon],
+                [nueva_lat, nueva_lon],
                 popup=f"ID: {id_objetivo} ({tipo_accion})",
                 icon=folium.Icon(color="green", icon="map-marker")
             ).add_to(m_edit)
             
-            map_data = st_folium(m_edit, width=500, height=400, key=f"map_edit_{id_objetivo}_{st.session_state.edit_lat}_{st.session_state.edit_lon}")
+            map_edit_data = st_folium(m_edit, width=500, height=400, key="map_edit_static_key")
             
-            if map_data and map_data.get("last_clicked"):
-                clicked_lat = map_data["last_clicked"]["lat"]
-                clicked_lon = map_data["last_clicked"]["lng"]
+            if map_edit_data and map_edit_data.get("last_clicked"):
+                clicked_lat = map_edit_data["last_clicked"]["lat"]
+                clicked_lon = map_edit_data["last_clicked"]["lng"]
                 if clicked_lat != st.session_state.edit_lat or clicked_lon != st.session_state.edit_lon:
                     st.session_state.edit_lat = clicked_lat
                     st.session_state.edit_lon = clicked_lon
