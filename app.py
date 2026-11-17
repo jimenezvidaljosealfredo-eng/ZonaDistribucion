@@ -233,23 +233,89 @@ def crear_mapa(latitud, longitud, zoom=15):
         control_scale=True,
     )
 
+        # Copia independiente para agregar etiquetas
+    # sin modificar el GeoJSON original.
+    geojson_etiquetado = json.loads(
+        json.dumps(geojson_data)
+    )
+
+    for feature in geojson_etiquetado["features"]:
+
+        props = feature["properties"]
+
+        # ID de zona de distribución
+        props["_id_zona_dis"] = (
+            props.get("ORIG_IdZonaDist")
+            or props.get("idZonaDis")
+            or props.get("CODIGO_ZONA_RTM")
+            or props.get("id_zona")
+            or "Sin asignar"
+        )
+
+        # Código de zona RTM
+        props["_codigo_rtm"] = (
+            props.get("CODIGO_ZONA_RTM")
+            or props.get("id_zona")
+            or "Sin asignar"
+        )
+
+        # Distribuidor
+        props["_proveedor"] = (
+            props.get("PROVEEDOR_RTM")
+            or props.get("distribuidor")
+            or "Sin asignar"
+        )
+
+    # Capa interactiva de polígonos
     folium.GeoJson(
-        geojson_data,
+        geojson_etiquetado,
         name="Zonas RTM",
+
         style_function=lambda feature: {
             "fillColor": "#3388ff",
             "color": "#3388ff",
             "weight": 2,
-            "fillOpacity": 0.20,
+            "fillOpacity": 0.20
         },
+
         highlight_function=lambda feature: {
             "weight": 4,
             "color": "#ff7800",
-            "fillOpacity": 0.35,
+            "fillOpacity": 0.45
         },
-    ).add_to(mapa)
 
-    folium.LayerControl(collapsed=True).add_to(mapa)
+        # ETIQUETA AL PASAR EL MOUSE
+        tooltip=folium.GeoJsonTooltip(
+            fields=[
+                "_id_zona_dis",
+                "_codigo_rtm",
+              "_proveedor"
+            ],
+            aliases=[
+                "ID Zona Distribución:",
+                "Código Zona RTM:",
+                "Distribuidor:"
+            ],
+            labels=True
+        )
+
+    ).add_to(mapa)    "_proveedor"
+            ],
+            aliases=[
+                "ID Zona Distribución:",
+                "Código Zona RTM:",
+                "Distribuidor:"
+            ],
+            sticky=True,
+            labels=True
+        ),
+
+        # VENTANA AL HACER CLIC
+        popup=folium.GeoJsonPopup(
+            fields=[
+                "_id_zona_dis",
+                "_codigo_rtm",
+              
 
     return mapa
 
