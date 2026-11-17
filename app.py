@@ -92,7 +92,7 @@ def load_data():
     with open(ARCHIVO_GEOJSON, "r", encoding="utf-8") as archivo:
         geojson_data = json.load(archivo)
 
-    # Pre-procesar etiquetas usando las llaves exactas del GeoJSON
+    # Pre-procesar etiquetas con saltos de línea para Zona Comercial
     for feature in geojson_data.get("features", []):
         props = feature.setdefault("properties", {})
 
@@ -103,21 +103,12 @@ def load_data():
         )
         lineas = [l.strip() for l in str(raw_prov).splitlines() if l.strip()]
 
-        # Extraer nombres de proveedores y detalle de zonas comerciales
-        lista_prov = []
-        for linea in lineas:
-            if ":" in linea:
-                lista_prov.append(linea.split(":", 1)[0].strip())
-            else:
-                lista_prov.append(linea)
-
-        props["etq_proveedores"] = (
-            ", ".join(lista_prov)
-            if lista_prov
-            else str(props.get("PROVEEDOR_RTM") or "Sin dato")
+        # Versión con <br> para el mapa y versión con salto de línea normal para Streamlit
+        props["etq_zona_comercial_html"] = (
+            "<br>".join(lineas) if lineas else "Sin dato"
         )
-        props["etq_zona_comercial"] = (
-            " | ".join(lineas) if lineas else "Sin dato"
+        props["etq_zona_comercial_txt"] = (
+            "\n".join(lineas) if lineas else "Sin dato"
         )
         props["etq_zona_distribuidor"] = str(
             props.get("ORIG_IdZonaDist")
@@ -212,23 +203,22 @@ def procesar_clic_mapa(map_data, prefijo):
 
 
 def obtener_asignacion(latitud, longitud):
-    """Devuelve Zona Comercial (Proveedores), Zona Distribuidor y Proveedor RTM."""
+    """Devuelve Zona Comercial (con saltos de línea) y Zona de Distribuidor."""
     punto = Point(float(longitud), float(latitud))
 
     for geometria, propiedades in geometrias_rtm:
         if geometria.contains(punto):
-            zona_comercial = propiedades.get("etq_zona_comercial") or propiedades.get("CODIGO_ZONA_RTM")
+            zona_comercial = (
+                propiedades.get("etq_zona_comercial_txt")
+                or propiedades.get("CODIGO_ZONA_RTM")
+            )
             id_zona_dis = (
                 propiedades.get("ORIG_IdZonaDist")
                 or propiedades.get("CODIGO_ZONA_RTM")
             )
-            proveedores = (
-                propiedades.get("etq_proveedores")
-                or propiedades.get("PROVEEDOR_RTM")
-            )
-            return zona_comercial, id_zona_dis, proveedores
+            return zona_comercial, id_zona_dis
 
-    return None, None, None
+    return None, None
 
 
 def renderizar_filtros_clientes(prefijo_ui):
@@ -370,14 +360,12 @@ def crear_mapa(latitud, longitud, zoom=15, geojson_a_mostrar=None):
 
     datos_geo = geojson_a_mostrar if geojson_a_mostrar is not None else geojson_data
 
-    # Los 3 campos exactos solicitados para la etiqueta del polígono
+    # Solo Zona Comercial (separada por Enter) y Zona de Distribuidor
     campos = [
-        "etq_proveedores",
-        "etq_zona_comercial",
+        "etq_zona_comercial_html",
         "etq_zona_distribuidor",
     ]
     alias = [
-        "Proveedores:",
         "Zona Comercial:",
         "Zona de Distribuidor:",
     ]
@@ -405,7 +393,8 @@ def crear_mapa(latitud, longitud, zoom=15, geojson_a_mostrar=None):
                 style=(
                     "background-color: white; color: #222; "
                     "font-family: sans-serif; font-size: 12px; "
-                    "padding: 8px; border-radius: 4px;"
+                    "padding: 8px; border-radius: 4px; "
+                    "white-space: pre-line; vertical-align: top;"
                 ),
             ),
             bubblingMouseEvents=False,
@@ -672,7 +661,7 @@ if modo == "Consulta y Asignación Rápida":
             args=("cons",),
         )
 
-        zona_com_pol, id_zona_dis, proveedores_pol = obtener_asignacion(
+        zona_com_pol, id_zona_dis = obtener_asignacion(
             st.session_state["cons_lat"],
             st.session_state["cons_lon"],
         )
@@ -680,9 +669,9 @@ if modo == "Consulta y Asignación Rápida":
         st.markdown("### 🎯 Cuadro de Asignación Territorial")
 
         if id_zona_dis or zona_com_pol:
+            zonas_formateadas = (zona_com_pol or "Sin dato").replace("\n", "  \n")
             st.info(
-                f"🏢 **Proveedores:** `{proveedores_pol or 'Sin dato'}`\n\n"
-                f"🛍️ **Zona Comercial:** `{zona_com_pol or 'Sin dato'}`\n\n"
+                f"🛍️ **Zona Comercial:**\n{zonas_formateadas}\n\n"
                 f"📌 **Zona de Distribuidor:** `{id_zona_dis or 'Sin dato'}`"
             )
         else:
@@ -806,18 +795,17 @@ elif modo == "Editor y Creación de Clientes":
                 key="input_usuario",
             )
 
-            zona_com_temp, id_zona_dis_temp, proveedores_temp = obtener_asignacion(
+            zona_com_temp, id_zona_dis_temp = obtener_asignacion(
                 st.session_state["edit_lat"],
                 st.session_state["edit_lon"],
             )
 
             zona_com_temp = zona_com_temp or "Fuera de cobertura"
             id_zona_dis_temp = id_zona_dis_temp or "Fuera de cobertura"
-            proveedores_temp = proveedores_temp or "Ninguno"
 
             st.markdown("---")
-            st.markdown(f"**Proveedores:** `{proveedores_temp}`")
-            st.markdown(f"**Zona Comercial:** `{zona_com_temp}`")
+            st.markdown("**Zona Comercial:**")
+            st.text(zona_com_temp)
             st.markdown(f"**Zona de Distribuidor:** `{id_zona_dis_temp}`")
 
             if st.button("Guardar Registro / Corrección", type="primary"):
@@ -829,8 +817,7 @@ elif modo == "Editor y Creación de Clientes":
                     "Direccion": direccion_val,
                     "Lat_Asignada": st.session_state["edit_lat"],
                     "Lon_Asignada": st.session_state["edit_lon"],
-                    "Proveedores": proveedores_temp,
-                    "Zona_Comercial": zona_com_temp,
+                    "Zona_Comercial": zona_com_temp.replace("\n", " | "),
                     "Zona_Distribuidor": id_zona_dis_temp,
                     "Usuario": usuario,
                 }
