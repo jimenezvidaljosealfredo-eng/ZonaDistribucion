@@ -233,7 +233,7 @@ def crear_mapa(latitud, longitud, zoom=15):
         control_scale=True,
     )
 
-        # Copia independiente para agregar etiquetas
+    # Copia independiente para agregar etiquetas
     # sin modificar el GeoJSON original.
     geojson_etiquetado = json.loads(
         json.dumps(geojson_data)
@@ -270,52 +270,35 @@ def crear_mapa(latitud, longitud, zoom=15):
     folium.GeoJson(
         geojson_etiquetado,
         name="Zonas RTM",
-
         style_function=lambda feature: {
             "fillColor": "#3388ff",
             "color": "#3388ff",
             "weight": 2,
-            "fillOpacity": 0.20
+            "fillOpacity": 0.20,
         },
-
         highlight_function=lambda feature: {
             "weight": 4,
             "color": "#ff7800",
-            "fillOpacity": 0.45
+            "fillOpacity": 0.45,
         },
-
         # ETIQUETA AL PASAR EL MOUSE
         tooltip=folium.GeoJsonTooltip(
             fields=[
                 "_id_zona_dis",
                 "_codigo_rtm",
-              "_proveedor"
+                "_proveedor",
             ],
             aliases=[
                 "ID Zona Distribución:",
                 "Código Zona RTM:",
-                "Distribuidor:"
-            ],
-            labels=True
-        )
-
-    ).add_to(mapa)    "_proveedor"
-            ],
-            aliases=[
-                "ID Zona Distribución:",
-                "Código Zona RTM:",
-                "Distribuidor:"
+                "Distribuidor:",
             ],
             sticky=True,
-            labels=True
+            labels=True,
         ),
+    ).add_to(mapa)
 
-        # VENTANA AL HACER CLIC
-        popup=folium.GeoJsonPopup(
-            fields=[
-                "_id_zona_dis",
-                "_codigo_rtm",
-              
+    folium.LayerControl(collapsed=True).add_to(mapa)
 
     return mapa
 
