@@ -69,7 +69,6 @@ def load_data():
     if "IdCliente" not in df_clientes.columns:
         raise ValueError("El archivo CSV no contiene la columna 'IdCliente'.")
 
-    # Limpieza segura sin barras invertidas ni regex (evita SyntaxError al copiar)
     columnas_texto = ["IdCliente", COL_GRUPO_RTM, COL_ZONA_COM, COL_ZONA_DIS]
     for col in columnas_texto:
         if col in df_clientes.columns:
@@ -81,15 +80,15 @@ def load_data():
                 .str.removesuffix(".0")
             )
 
-    # Vectorización de coordenadas una sola vez
+    # Nombres sin guion bajo inicial para que itertuples() los reconozca
     for col in ["Latitud", "Longitud"]:
         if col in df_clientes.columns:
-            df_clientes[f"_{col}_num"] = pd.to_numeric(
+            df_clientes[f"{col}_num"] = pd.to_numeric(
                 df_clientes[col].astype(str).str.replace(",", ".", regex=False),
                 errors="coerce",
             ).round(6)
         else:
-            df_clientes[f"_{col}_num"] = None
+            df_clientes[f"{col}_num"] = None
 
     with open(ARCHIVO_GEOJSON, "r", encoding="utf-8") as archivo:
         geojson_data = json.load(archivo)
@@ -398,31 +397,35 @@ def crear_mapa(latitud, longitud, zoom=15, geojson_a_mostrar=None):
 
 
 def agregar_clientes_optimizado(mapa, df_filtrado, modo_vista="Puntos filtrados (máx. 500)"):
-    df_validos = df_filtrado.dropna(subset=["_Latitud_num", "_Longitud_num"])
+    df_validos = df_filtrado.dropna(subset=["Latitud_num", "Longitud_num"])
     df_validos = df_validos[
-        (df_validos["_Latitud_num"].between(-90, 90))
-        & (df_validos["_Longitud_num"].between(-180, 180))
+        (df_validos["Latitud_num"].between(-90, 90))
+        & (df_validos["Longitud_num"].between(-180, 180))
     ]
 
     if df_validos.empty or modo_vista == "Ocultar cartera de clientes":
         return mapa
 
     if modo_vista == "Agrupar en Clústeres (Rápido)":
-        coordenadas = df_validos[["_Latitud_num", "_Longitud_num"]].values.tolist()
+        coordenadas = df_validos[["Latitud_num", "Longitud_num"]].values.tolist()
         FastMarkerCluster(coordenadas, name="Clúster Clientes").add_to(mapa)
         return mapa
 
     capa_clientes = folium.FeatureGroup(name="Clientes Filtrados", show=True)
     df_muestra = df_validos.head(500)
 
-    for row in df_muestra.itertuples():
-        c_id = html.escape(str(getattr(row, "IdCliente", "")))
-        razon = html.escape(str(getattr(row, "Razon_Social", "S/N")))
-        direc = html.escape(str(getattr(row, "Direccion", "S/N")))
-        z_dis = html.escape(str(getattr(row, COL_ZONA_DIS, "S/N")))
+    # Iteración segura por registros (evita conflictos de nombres en itertuples)
+    columnas_necesarias = ["IdCliente", "Razon_Social", "Direccion", COL_ZONA_DIS, "Latitud_num", "Longitud_num"]
+    cols_presentes = [c for c in columnas_necesarias if c in df_muestra.columns]
+
+    for row in df_muestra[cols_presentes].to_dict(orient="records"):
+        c_id = html.escape(str(row.get("IdCliente", "")))
+        razon = html.escape(str(row.get("Razon_Social", "S/N")))
+        direc = html.escape(str(row.get("Direccion", "S/N")))
+        z_dis = html.escape(str(row.get(COL_ZONA_DIS, "S/N")))
 
         folium.CircleMarker(
-            location=[row._Latitud_num, row._Longitud_num],
+            location=[row["Latitud_num"], row["Longitud_num"]],
             radius=4,
             color="#455a64",
             weight=1,
@@ -529,12 +532,12 @@ if modo == "Consulta y Asignación Rápida":
     if token_filtro_actual != st.session_state["prev_cons_filter_token"]:
         st.session_state["prev_cons_filter_token"] = token_filtro_actual
         if not id_buscado and filtros_activos["hay_filtro"]:
-            df_coords = df_clientes_filtrados.dropna(subset=["_Latitud_num", "_Longitud_num"])
+            df_coords = df_clientes_filtrados.dropna(subset=["Latitud_num", "Longitud_num"])
             if not df_coords.empty:
                 actualizar_coordenadas(
                     "cons",
-                    df_coords["_Latitud_num"].mean(),
-                    df_coords["_Longitud_num"].mean(),
+                    df_coords["Latitud_num"].mean(),
+                    df_coords["Longitud_num"].mean(),
                 )
 
     if id_buscado != st.session_state["prev_cons_id"]:
@@ -542,8 +545,8 @@ if modo == "Consulta y Asignación Rápida":
         cliente = obtener_datos_cliente(id_buscado)
 
         if cliente is not None:
-            latitud = cliente.get("_Latitud_num")
-            longitud = cliente.get("_Longitud_num")
+            latitud = cliente.get("Latitud_num")
+            longitud = cliente.get("Longitud_num")
             latitud = LAT_DEFAULT if pd.isna(latitud) else float(latitud)
             longitud = LON_DEFAULT if pd.isna(longitud) else float(longitud)
         else:
@@ -695,8 +698,8 @@ elif modo == "Editor y Creación de Clientes":
     row_data = obtener_datos_cliente(id_objetivo) if id_objetivo else None
 
     if row_data is not None:
-        lat_val = row_data.get("_Latitud_num")
-        lon_val = row_data.get("_Longitud_num")
+        lat_val = row_data.get("Latitud_num")
+        lon_val = row_data.get("Longitud_num")
         default_lat = LAT_DEFAULT if pd.isna(lat_val) else float(lat_val)
         default_lon = LON_DEFAULT if pd.isna(lon_val) else float(lon_val)
         razon_social_val = row_data.get("Razon_Social", "N/A")
