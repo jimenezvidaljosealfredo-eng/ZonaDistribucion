@@ -80,7 +80,6 @@ def load_data():
                 .str.removesuffix(".0")
             )
 
-    # Nombres sin guion bajo inicial para que itertuples() los reconozca
     for col in ["Latitud", "Longitud"]:
         if col in df_clientes.columns:
             df_clientes[f"{col}_num"] = pd.to_numeric(
@@ -93,20 +92,38 @@ def load_data():
     with open(ARCHIVO_GEOJSON, "r", encoding="utf-8") as archivo:
         geojson_data = json.load(archivo)
 
-    campos_etiqueta = [
-        ("_orig_proveedores", "ORIG_PROVEEDORES"),
-        ("_orig_visita_vendedor", "ORIG_VISITA_VENDEDOR"),
-        ("_orig_dv_distribuidor", "ORIG_DV_DISTRIBUIDOR"),
-        ("_orig_id_zona_dist", "ORIG_IdZonaDist"),
-    ]
-
+    # Pre-procesar etiquetas usando las llaves exactas del GeoJSON
     for feature in geojson_data.get("features", []):
-        propiedades = feature.setdefault("properties", {})
-        for campo_auxiliar, campo_original in campos_etiqueta:
-            valor = propiedades.get(campo_original)
-            propiedades[campo_auxiliar] = (
-                str(valor).strip() if valor not in (None, "") else "Sin dato"
-            )
+        props = feature.setdefault("properties", {})
+
+        raw_prov = (
+            props.get("ORIG_Proveedores")
+            or props.get("ORIG_PROVEEDORES")
+            or ""
+        )
+        lineas = [l.strip() for l in str(raw_prov).splitlines() if l.strip()]
+
+        # Extraer nombres de proveedores y detalle de zonas comerciales
+        lista_prov = []
+        for linea in lineas:
+            if ":" in linea:
+                lista_prov.append(linea.split(":", 1)[0].strip())
+            else:
+                lista_prov.append(linea)
+
+        props["etq_proveedores"] = (
+            ", ".join(lista_prov)
+            if lista_prov
+            else str(props.get("PROVEEDOR_RTM") or "Sin dato")
+        )
+        props["etq_zona_comercial"] = (
+            " | ".join(lineas) if lineas else "Sin dato"
+        )
+        props["etq_zona_distribuidor"] = str(
+            props.get("ORIG_IdZonaDist")
+            or props.get("CODIGO_ZONA_RTM")
+            or "Sin dato"
+        ).strip()
 
     return df_clientes, geojson_data
 
@@ -195,24 +212,21 @@ def procesar_clic_mapa(map_data, prefijo):
 
 
 def obtener_asignacion(latitud, longitud):
+    """Devuelve Zona Comercial (Proveedores), Zona Distribuidor y Proveedor RTM."""
     punto = Point(float(longitud), float(latitud))
 
     for geometria, propiedades in geometrias_rtm:
         if geometria.contains(punto):
-            zona = (
-                propiedades.get("CODIGO_ZONA_RTM")
-                or propiedades.get("id_zona")
-            )
+            zona_comercial = propiedades.get("etq_zona_comercial") or propiedades.get("CODIGO_ZONA_RTM")
             id_zona_dis = (
                 propiedades.get("ORIG_IdZonaDist")
-                or propiedades.get("idZonaDis")
-                or zona
+                or propiedades.get("CODIGO_ZONA_RTM")
             )
-            distribuidor = (
-                propiedades.get("PROVEEDOR_RTM")
-                or propiedades.get("distribuidor")
+            proveedores = (
+                propiedades.get("etq_proveedores")
+                or propiedades.get("PROVEEDOR_RTM")
             )
-            return zona, id_zona_dis, distribuidor
+            return zona_comercial, id_zona_dis, proveedores
 
     return None, None, None
 
@@ -330,11 +344,11 @@ def filtrar_geojson_por_seleccion(df_filtrado, filtros_activos, ocultar_poligono
     for feature in geojson_data.get("features", []):
         props = feature.get("properties", {})
 
-        z_dis_geo = str(props.get("ORIG_IdZonaDist") or props.get("idZonaDis") or "").strip().removesuffix(".0")
-        z_com_geo = str(props.get("CODIGO_ZONA_RTM") or props.get("id_zona") or "").strip().removesuffix(".0")
+        z_dis_geo = str(props.get("ORIG_IdZonaDist") or props.get("CODIGO_ZONA_RTM") or "").strip().removesuffix(".0")
+        texto_prov_geo = str(props.get("ORIG_Proveedores") or "")
 
         coincide_dis = bool(z_dis_geo and z_dis_geo in zonas_dis_validas)
-        coincide_com = bool(z_com_geo and z_com_geo in zonas_com_validas)
+        coincide_com = any(z_com in texto_prov_geo for z_com in zonas_com_validas if z_com and z_com != "Sin asignar")
 
         if coincide_dis or coincide_com:
             features_filtradas.append(feature)
@@ -356,17 +370,16 @@ def crear_mapa(latitud, longitud, zoom=15, geojson_a_mostrar=None):
 
     datos_geo = geojson_a_mostrar if geojson_a_mostrar is not None else geojson_data
 
+    # Los 3 campos exactos solicitados para la etiqueta del polígono
     campos = [
-        "_orig_proveedores",
-        "_orig_visita_vendedor",
-        "_orig_dv_distribuidor",
-        "_orig_id_zona_dist",
+        "etq_proveedores",
+        "etq_zona_comercial",
+        "etq_zona_distribuidor",
     ]
     alias = [
-        "Orig Proveedores:",
-        "DV Vendedor:",
-        "DV Distribuidor:",
-        "IdZona Dist:",
+        "Proveedores:",
+        "Zona Comercial:",
+        "Zona de Distribuidor:",
     ]
 
     if datos_geo.get("features"):
@@ -389,6 +402,11 @@ def crear_mapa(latitud, longitud, zoom=15, geojson_a_mostrar=None):
                 aliases=alias,
                 sticky=True,
                 labels=True,
+                style=(
+                    "background-color: white; color: #222; "
+                    "font-family: sans-serif; font-size: 12px; "
+                    "padding: 8px; border-radius: 4px;"
+                ),
             ),
             bubblingMouseEvents=False,
         ).add_to(mapa)
@@ -414,14 +432,14 @@ def agregar_clientes_optimizado(mapa, df_filtrado, modo_vista="Puntos filtrados 
     capa_clientes = folium.FeatureGroup(name="Clientes Filtrados", show=True)
     df_muestra = df_validos.head(500)
 
-    # Iteración segura por registros (evita conflictos de nombres en itertuples)
-    columnas_necesarias = ["IdCliente", "Razon_Social", "Direccion", COL_ZONA_DIS, "Latitud_num", "Longitud_num"]
+    columnas_necesarias = ["IdCliente", "Razon_Social", "Direccion", COL_ZONA_COM, COL_ZONA_DIS, "Latitud_num", "Longitud_num"]
     cols_presentes = [c for c in columnas_necesarias if c in df_muestra.columns]
 
     for row in df_muestra[cols_presentes].to_dict(orient="records"):
         c_id = html.escape(str(row.get("IdCliente", "")))
         razon = html.escape(str(row.get("Razon_Social", "S/N")))
         direc = html.escape(str(row.get("Direccion", "S/N")))
+        z_com = html.escape(str(row.get(COL_ZONA_COM, "S/N")))
         z_dis = html.escape(str(row.get(COL_ZONA_DIS, "S/N")))
 
         folium.CircleMarker(
@@ -436,7 +454,8 @@ def agregar_clientes_optimizado(mapa, df_filtrado, modo_vista="Puntos filtrados 
             tooltip=f"{c_id} - {razon}",
             popup=folium.Popup(
                 f"<b>ID:</b> {c_id}<br><b>Cliente:</b> {razon}<br>"
-                f"<b>Dir:</b> {direc}<br><b>idZonaDis:</b> {z_dis}",
+                f"<b>Dir:</b> {direc}<br><b>Zona Comercial:</b> {z_com}<br>"
+                f"<b>Zona Distribuidor:</b> {z_dis}",
                 max_width=260,
             ),
         ).add_to(capa_clientes)
@@ -653,18 +672,18 @@ if modo == "Consulta y Asignación Rápida":
             args=("cons",),
         )
 
-        zona, id_zona_dis, distribuidor = obtener_asignacion(
+        zona_com_pol, id_zona_dis, proveedores_pol = obtener_asignacion(
             st.session_state["cons_lat"],
             st.session_state["cons_lon"],
         )
 
         st.markdown("### 🎯 Cuadro de Asignación Territorial")
 
-        if id_zona_dis or zona:
+        if id_zona_dis or zona_com_pol:
             st.info(
-                f"📌 **Id zona Dis / Zona:** `{id_zona_dis or zona}`\n\n"
-                f"🏢 **Distribuidor / Proveedor:** "
-                f"`{distribuidor or 'Asignado por Zona'}`"
+                f"🏢 **Proveedores:** `{proveedores_pol or 'Sin dato'}`\n\n"
+                f"🛍️ **Zona Comercial:** `{zona_com_pol or 'Sin dato'}`\n\n"
+                f"📌 **Zona de Distribuidor:** `{id_zona_dis or 'Sin dato'}`"
             )
         else:
             st.error(
@@ -787,19 +806,19 @@ elif modo == "Editor y Creación de Clientes":
                 key="input_usuario",
             )
 
-            zona_temp, id_zona_dis_temp, distribuidor_temp = obtener_asignacion(
+            zona_com_temp, id_zona_dis_temp, proveedores_temp = obtener_asignacion(
                 st.session_state["edit_lat"],
                 st.session_state["edit_lon"],
             )
 
-            zona_temp = zona_temp or "Fuera de cobertura"
+            zona_com_temp = zona_com_temp or "Fuera de cobertura"
             id_zona_dis_temp = id_zona_dis_temp or "Fuera de cobertura"
-            distribuidor_temp = distribuidor_temp or "Ninguno"
+            proveedores_temp = proveedores_temp or "Ninguno"
 
             st.markdown("---")
-            st.markdown(f"**Zona Detectada:** `{zona_temp}`")
-            st.markdown(f"**Id Zona Dis:** `{id_zona_dis_temp}`")
-            st.markdown(f"**Distribuidor:** `{distribuidor_temp}`")
+            st.markdown(f"**Proveedores:** `{proveedores_temp}`")
+            st.markdown(f"**Zona Comercial:** `{zona_com_temp}`")
+            st.markdown(f"**Zona de Distribuidor:** `{id_zona_dis_temp}`")
 
             if st.button("Guardar Registro / Corrección", type="primary"):
                 nuevo_registro = {
@@ -810,8 +829,9 @@ elif modo == "Editor y Creación de Clientes":
                     "Direccion": direccion_val,
                     "Lat_Asignada": st.session_state["edit_lat"],
                     "Lon_Asignada": st.session_state["edit_lon"],
-                    "Id_Zona_Dis": id_zona_dis_temp,
-                    "Distribuidor": distribuidor_temp,
+                    "Proveedores": proveedores_temp,
+                    "Zona_Comercial": zona_com_temp,
+                    "Zona_Distribuidor": id_zona_dis_temp,
                     "Usuario": usuario,
                 }
                 guardar_registro_bitacora(nuevo_registro)
