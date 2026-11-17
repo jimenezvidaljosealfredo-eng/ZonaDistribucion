@@ -219,12 +219,17 @@ def obtener_asignacion(latitud, longitud):
 
 def crear_mapa(latitud, longitud, zoom=15):
     """
-    Crea el mapa con OpenStreetMap como cartografía base.
+    Crea el mapa con OpenStreetMap, polígonos RTM interactivos
+    y etiquetas al pasar el cursor o hacer clic.
 
-    OSM se mantiene como opción recomendada: no requiere API Key
-    ni expone la aplicación a las condiciones de uso de teselas
-    no oficiales de Google. El servidor público de OSM sí tiene
-    política de uso y no ofrece SLA para aplicaciones productivas.
+    Campos del GeoJSON usados en la etiqueta:
+    - ORIG_PROVEEDORES
+    - ORIG_VISITA_VENDEDOR
+    - ORIG_DV_DISTRIBUIDOR
+    - ORIG_IdZonaDist
+
+    bubblingMouseEvents=False evita que el clic sobre un polígono
+    se interprete como clic sobre el mapa y mueva el marcador.
     """
     mapa = folium.Map(
         location=[latitud, longitud],
@@ -233,40 +238,33 @@ def crear_mapa(latitud, longitud, zoom=15):
         control_scale=True,
     )
 
-    # Copia independiente para agregar etiquetas
-    # sin modificar el GeoJSON original.
-    geojson_etiquetado = json.loads(
-        json.dumps(geojson_data)
-    )
+    # Copia independiente: no se alteran las propiedades originales
+    # que utiliza el motor Point-in-Polygon.
+    geojson_etiquetado = json.loads(json.dumps(geojson_data))
 
-    for feature in geojson_etiquetado["features"]:
+    campos_etiqueta = [
+        ("_orig_proveedores", "ORIG_PROVEEDORES"),
+        ("_orig_visita_vendedor", "ORIG_VISITA_VENDEDOR"),
+        ("_orig_dv_distribuidor", "ORIG_DV_DISTRIBUIDOR"),
+        ("_orig_id_zona_dist", "ORIG_IdZonaDist"),
+    ]
 
-        props = feature["properties"]
+    for feature in geojson_etiquetado.get("features", []):
+        propiedades = feature.setdefault("properties", {})
+        for campo_auxiliar, campo_original in campos_etiqueta:
+            valor = propiedades.get(campo_original)
+            propiedades[campo_auxiliar] = (
+                str(valor).strip() if valor not in (None, "") else "Sin dato"
+            )
 
-        # ID de zona de distribución
-        props["_id_zona_dis"] = (
-            props.get("ORIG_IdZonaDist")
-            or props.get("idZonaDis")
-            or props.get("CODIGO_ZONA_RTM")
-            or props.get("id_zona")
-            or "Sin asignar"
-        )
+    campos = [campo_auxiliar for campo_auxiliar, _ in campos_etiqueta]
+    alias = [
+        "Orig Proveedores:",
+        "DV Vendedor:",
+        "DV Distribuidor:",
+        "IdZona Dist:",
+    ]
 
-        # Código de zona RTM
-        props["_codigo_rtm"] = (
-            props.get("CODIGO_ZONA_RTM")
-            or props.get("id_zona")
-            or "Sin asignar"
-        )
-
-        # Distribuidor
-        props["_proveedor"] = (
-            props.get("PROVEEDOR_RTM")
-            or props.get("distribuidor")
-            or "Sin asignar"
-        )
-
-    # Capa interactiva de polígonos
     folium.GeoJson(
         geojson_etiquetado,
         name="Zonas RTM",
@@ -279,27 +277,103 @@ def crear_mapa(latitud, longitud, zoom=15):
         highlight_function=lambda feature: {
             "weight": 4,
             "color": "#ff7800",
-            "fillOpacity": 0.45,
+            "fillOpacity": 0.42,
         },
-        # ETIQUETA AL PASAR EL MOUSE
         tooltip=folium.GeoJsonTooltip(
-            fields=[
-                "_id_zona_dis",
-                "_codigo_rtm",
-                "_proveedor",
-            ],
-            aliases=[
-                "ID Zona Distribución:",
-                "Código Zona RTM:",
-                "Distribuidor:",
-            ],
+            fields=campos,
+            aliases=alias,
             sticky=True,
             labels=True,
+            localize=True,
+            style=(
+                "background-color: white; color: #222; "
+                "font-family: sans-serif; font-size: 12px; "
+                "padding: 8px;"
+            ),
         ),
+        popup=folium.GeoJsonPopup(
+            fields=campos,
+            aliases=alias,
+            labels=True,
+            localize=True,
+            style="background-color: white;",
+        ),
+        bubblingMouseEvents=False,
     ).add_to(mapa)
 
     folium.LayerControl(collapsed=True).add_to(mapa)
+    return mapa
 
+
+def agregar_clientes_al_mapa(mapa, id_seleccionado=None):
+    """
+    Dibuja todos los clientes georreferenciados como círculos pequeños
+    y discretos. Al hacer clic en un punto se abre su ficha.
+
+    El cliente actualmente seleccionado se resalta suavemente.
+    Los registros sin coordenadas válidas se omiten del mapa.
+    """
+    capa_clientes = folium.FeatureGroup(
+        name="Clientes",
+        show=True,
+        control=True,
+    )
+
+    columnas_popup = [
+        ("IdCliente", "ID Cliente"),
+        ("Razon_Social", "Razón Social"),
+        ("Direccion", "Dirección"),
+    ]
+
+    for _, cliente in df_clientes.iterrows():
+        lat = convertir_coordenada(cliente.get("Latitud"), None)
+        lon = convertir_coordenada(cliente.get("Longitud"), None)
+
+        if lat is None or lon is None:
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            continue
+
+        cliente_id = str(cliente.get("IdCliente", ""))
+        es_seleccionado = (
+            id_seleccionado is not None
+            and cliente_id == str(id_seleccionado)
+        )
+
+        # HTML escapado para mostrar datos del CSV de forma segura.
+        import html
+        filas_html = []
+        for columna, etiqueta in columnas_popup:
+            valor = cliente.get(columna, "")
+            if pd.isna(valor):
+                valor = ""
+            filas_html.append(
+                f"<b>{html.escape(etiqueta)}:</b> "
+                f"{html.escape(str(valor))}"
+            )
+
+        popup_html = "<br>".join(filas_html)
+        popup = folium.Popup(
+            popup_html,
+            max_width=320,
+            min_width=180,
+        )
+
+        folium.CircleMarker(
+            location=[lat, lon],
+            radius=5 if es_seleccionado else 3,
+            color="#ffffff" if es_seleccionado else "#555555",
+            weight=1 if es_seleccionado else 0.6,
+            fill=True,
+            fill_color="#f39c12" if es_seleccionado else "#455a64",
+            fill_opacity=0.95 if es_seleccionado else 0.72,
+            opacity=0.9,
+            bubblingMouseEvents=False,
+            tooltip=f"Cliente {cliente_id}",
+            popup=popup,
+        ).add_to(capa_clientes)
+
+    capa_clientes.add_to(mapa)
     return mapa
 
 
@@ -430,13 +504,34 @@ if modo == "Consulta y Asignación Rápida":
             zoom=15,
         )
 
-        folium.Marker(
-            [
+        # Mostrar la base completa de clientes con puntos discretos.
+        # El popup de cada punto contiene la ficha básica del cliente.
+        agregar_clientes_al_mapa(
+            mapa_consulta,
+            id_seleccionado=id_buscado or None,
+        )
+
+        # Ubicación activa: círculo discreto, sin icono tipo pin.
+        # Los clientes de la base se muestran en gris; esta posición
+        # se distingue en azul para identificar la coordenada consultada.
+        folium.CircleMarker(
+            location=[
                 st.session_state["cons_lat"],
                 st.session_state["cons_lon"],
             ],
-            popup=f"ID: {id_buscado} - {razon_social_txt}",
-            icon=folium.Icon(color="red", icon="user"),
+            radius=7,
+            color="#ffffff",
+            weight=1.5,
+            fill=True,
+            fill_color="#1976d2",
+            fill_opacity=0.95,
+            bubblingMouseEvents=False,
+            tooltip="Coordenada activa",
+            popup=folium.Popup(
+                f"ID: {id_buscado or 'Sin seleccionar'}<br>"
+                f"{razon_social_txt}",
+                max_width=280,
+            ),
         ).add_to(mapa_consulta)
 
         # La key cambia por cliente: evita reutilizar un last_clicked
@@ -507,86 +602,38 @@ elif modo == "Editor y Creación de Clientes":
 
     st.subheader("📝 Gestión de Corrección y Creación Diaria")
 
-    tipo_accion = st.radio(
-        "Seleccione el flujo de trabajo:",
-        [
-            "Modificar Cliente Existente",
-            "Registrar Nuevo Cliente",
-        ],
-        horizontal=True,
-    )
+    # El editor queda dedicado exclusivamente a modificar clientes existentes.
+    tipo_accion = "Modificar Cliente Existente"
 
     row_data = None
     id_objetivo = ""
     razon_social_val = ""
     direccion_val = ""
 
-    # --------------------------------------------------------
-    # MODIFICAR CLIENTE EXISTENTE
-    # --------------------------------------------------------
+    lista_ids_edit = [""] + sorted(
+        df_clientes["IdCliente"].unique().tolist()
+    )
 
-    if tipo_accion == "Modificar Cliente Existente":
+    id_objetivo = st.selectbox(
+        "Seleccione el ID de Cliente existente a modificar:",
+        lista_ids_edit,
+        key="sel_edit_id",
+    )
 
-        lista_ids_edit = [""] + sorted(
-            df_clientes["IdCliente"].unique().tolist()
+    if id_objetivo:
+        row_data = obtener_datos_cliente(id_objetivo)
+
+    if row_data is not None:
+        default_lat = convertir_coordenada(
+            row_data.get("Latitud"), LAT_DEFAULT
         )
-
-        id_objetivo = st.selectbox(
-            "Seleccione el ID de Cliente existente a modificar:",
-            lista_ids_edit,
-            key="sel_edit_id",
+        default_lon = convertir_coordenada(
+            row_data.get("Longitud"), LON_DEFAULT
         )
-
-        if id_objetivo:
-            row_data = obtener_datos_cliente(id_objetivo)
-
-        if row_data is not None:
-            default_lat = convertir_coordenada(
-                row_data.get("Latitud"), LAT_DEFAULT
-            )
-            default_lon = convertir_coordenada(
-                row_data.get("Longitud"), LON_DEFAULT
-            )
-            razon_social_val = row_data.get("Razon_Social", "N/A")
-            direccion_val = row_data.get("Direccion", "N/A")
-        else:
-            default_lat, default_lon = LAT_DEFAULT, LON_DEFAULT
-
-    # --------------------------------------------------------
-    # REGISTRAR NUEVO CLIENTE
-    # --------------------------------------------------------
-
+        razon_social_val = row_data.get("Razon_Social", "N/A")
+        direccion_val = row_data.get("Direccion", "N/A")
     else:
-
-        st.markdown("#### Ingresar Datos del Nuevo Cliente")
-
-        id_objetivo = st.text_input(
-            "Nuevo Código de Cliente (IdCliente):",
-            placeholder="Ej: 999888",
-            key="new_client_id",
-        )
-
-        razon_social_val = st.text_input(
-            "Razón Social / Nombre Comercial:",
-            placeholder="Ej: TIENDA NUEVA",
-            key="new_client_name",
-        )
-
-        direccion_val = st.text_input(
-            "Dirección física:",
-            placeholder="Ej: Av. Principal Nro 123",
-            key="new_client_dir",
-        )
-
-        default_lat = LAT_DEFAULT
-        default_lon = LON_DEFAULT
-
-        if id_objetivo:
-            row_data = {
-                "IdCliente": id_objetivo,
-                "Razon_Social": razon_social_val,
-                "Direccion": direccion_val,
-            }
+        default_lat, default_lon = LAT_DEFAULT, LON_DEFAULT
 
     # --------------------------------------------------------
     # DETECTAR CAMBIO DE CLIENTE / OBJETIVO
@@ -647,19 +694,15 @@ elif modo == "Editor y Creación de Clientes":
                 icon=folium.Icon(color="green", icon="map-marker"),
             ).add_to(mapa_editor)
 
-            # Key dinámica: un objetivo nuevo no hereda el clic anterior.
-            tipo_key = (
-                "existente"
-                if tipo_accion == "Modificar Cliente Existente"
-                else "nuevo"
-            )
+            # La key depende del cliente seleccionado para no reutilizar
+            # eventos de mapa pertenecientes a otro cliente.
             id_key = str(id_objetivo).strip()
 
             map_edit_data = st_folium(
                 mapa_editor,
                 width=600,
                 height=450,
-                key=f"map_editor_{tipo_key}_{id_key}",
+                key=f"map_editor_existente_{id_key}",
                 returned_objects=["last_clicked"],
             )
 
@@ -761,6 +804,5 @@ elif modo == "Editor y Creación de Clientes":
     else:
 
         st.warning(
-            "Seleccione un cliente existente o ingrese un nuevo "
-            "código de cliente para comenzar."
+            "Seleccione un cliente existente para comenzar la corrección."
         )
